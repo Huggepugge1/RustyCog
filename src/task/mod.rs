@@ -55,7 +55,8 @@ where
         match &self.state {
             CogState::Waiting => Err(CogPoolError::TaskNotCompleted),
             CogState::Done(value) => Ok(value.clone()),
-            _ => todo!(),
+            CogState::Cancelled => Err(CogPoolError::TaskCancelled),
+            CogState::Paniced => Err(CogPoolError::TaskPanicked),
         }
     }
 
