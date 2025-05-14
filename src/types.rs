@@ -1,4 +1,6 @@
+use std::fmt::Debug;
+
 pub type CogId = i32;
 
-pub trait CogType: Send + Clone + 'static {}
-impl<T: Clone + Send + 'static> CogType for T {}
+pub trait CogType: Clone + Debug + Send + 'static {}
+impl<T: Clone + Debug + Send + 'static> CogType for T {}

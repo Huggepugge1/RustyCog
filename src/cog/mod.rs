@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    error::MachineError,
+    error::CogError,
     types::{CogId, CogType},
 };
 
@@ -33,14 +33,14 @@ where
     F: FnOnce() -> T,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        f.debug_struct("Task").field("id", &self.id).finish()
+        f.debug_struct("Cog").field("id", &self.id).finish()
     }
 }
 
 impl<T, F> Cog<T, F>
 where
     T: CogType,
-    F: FnOnce() -> T,
+    F: FnOnce() -> T + std::panic::UnwindSafe,
 {
     pub fn new(id: CogId, func: F) -> Self {
         Self {
@@ -51,21 +51,33 @@ where
         }
     }
 
-    pub fn get_result(&self) -> Result<T, CogPoolError> {
+    pub fn get_result(&self) -> Result<T, CogError> {
         match &self.state {
-            CogState::Waiting => Err(CogPoolError::TaskNotCompleted),
+            CogState::Waiting | CogState::Running => Err(CogError::NotCompleted),
             CogState::Done(value) => Ok(value.clone()),
-            CogState::Cancelled => Err(CogPoolError::TaskCancelled),
-            CogState::Paniced => Err(CogPoolError::TaskPanicked),
+
+            CogState::Cancelled => Err(CogError::Cancelled),
+            CogState::Panicked => Err(CogError::Panicked),
         }
     }
 
-    pub fn run(&mut self) -> Result<(), CogPoolError> {
+    pub fn run(&mut self) -> Result<(), CogError> {
+        self.state = CogState::Running;
         let func = std::mem::take(&mut self.func);
         if let Some(func) = func {
-            println!("Running task {}", self.id);
+            println!("Running cog {}", self.id);
 
-            let result = func();
+            let result = match std::panic::catch_unwind(func) {
+                Ok(result) => result,
+                Err(_err) => {
+                    self.state = CogState::Panicked;
+                    let (lock, cvar) = &*self.done;
+                    let mut done = lock.lock().unwrap();
+                    *done = true;
+                    cvar.notify_one();
+                    return Err(CogError::Panicked);
+                }
+            };
             let (lock, cvar) = &*self.done;
             let mut done = lock.lock().unwrap();
             *done = true;
@@ -73,7 +85,7 @@ where
             self.state = CogState::Done(result);
             Ok(())
         } else {
-            Err(MachineError::TaskAlreadyRan)
+            Err(CogError::AlreadyRan)
         }
     }
 }

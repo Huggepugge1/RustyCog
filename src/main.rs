@@ -1,25 +1,17 @@
-use rustycog::cog_pool::Machine;
+use rustycog::Machine;
 
 fn main() {
-    let mut pool = Machine::<i32>::new();
-    let id0 = pool.add_task(|| {
-        println!("Hello World from task 0");
-        33
-    });
-    let id1 = pool.add_task(|| {
-        println!("Hello World from task 1");
-        54327
-    });
+    let mut machine = Machine::<i32>::new();
 
-    pool.run();
+    let cogs = 1_000_000;
 
-    let result0 = pool.get_result(id0);
-    let result1 = pool.get_result(id1);
+    for i in 0..cogs {
+        machine.add_cog(move || i);
+    }
 
-    println!("{:?}, {:?}", result0, result1);
+    machine.run();
 
-    let result0 = pool.wait_for_result(id0);
-    let result1 = pool.wait_for_result(id1);
-
-    println!("{:?}, {:?}", result0, result1);
+    // for i in 0..cogs {
+    //     println!("{:?}", machine.wait_for_result(i));
+    // }
 }
