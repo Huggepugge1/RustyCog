@@ -12,7 +12,7 @@ pub enum CogState<T> {
     Waiting,
     Running,
     Cancelled,
-    Paniced,
+    Panicked,
     Done(T),
 }
 
