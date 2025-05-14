@@ -12,8 +12,14 @@ fn main() {
     });
 
     pool.run();
-    let result0 = pool.wait_for_result(id0).unwrap();
 
-    let result1 = pool.wait_for_result(id1).unwrap();
+    let result0 = pool.get_result(id0);
+    let result1 = pool.get_result(id1);
+
+    println!("{:?}, {:?}", result0, result1);
+
+    let result0 = pool.wait_for_result(id0);
+    let result1 = pool.wait_for_result(id1);
+
     println!("{:?}, {:?}", result0, result1);
 }

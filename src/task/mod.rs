@@ -1,20 +1,33 @@
-use std::fmt::{Debug, Formatter, Result as FormatResult};
+use std::{
+    fmt::{Debug, Formatter, Result as FormatResult},
+    sync::{Arc, Condvar, Mutex},
+};
 
 use crate::{
     error::CogPoolError,
-    types::{CogType, TaskId},
+    types::{CogId, CogType},
 };
 
-pub struct Task<T, F>
+pub enum CogState<T> {
+    Waiting,
+    Running,
+    Cancelled,
+    Panicked,
+    Done(T),
+}
+
+pub struct Cog<T, F>
 where
     T: CogType,
     F: FnOnce() -> T,
 {
-    pub id: TaskId,
+    pub id: CogId,
+    pub done: Arc<(Mutex<bool>, Condvar)>,
+    pub state: CogState<T>,
     func: Option<F>,
 }
 
-impl<T, F> Debug for Task<T, F>
+impl<T, F> Debug for Cog<T, F>
 where
     T: CogType,
     F: FnOnce() -> T,
@@ -24,22 +37,41 @@ where
     }
 }
 
-impl<T, F> Task<T, F>
+impl<T, F> Cog<T, F>
 where
     T: CogType,
     F: FnOnce() -> T,
 {
-    pub fn new(id: TaskId, func: F) -> Self {
+    pub fn new(id: CogId, func: F) -> Self {
         Self {
             id,
+            done: Arc::new((Mutex::new(false), Condvar::new())),
             func: Some(func),
+            state: CogState::Waiting,
         }
     }
 
-    pub fn run(&mut self) -> Result<T, CogPoolError> {
+    pub fn get_result(&self) -> Result<T, CogPoolError> {
+        match &self.state {
+            CogState::Waiting => Err(CogPoolError::TaskNotCompleted),
+            CogState::Done(value) => Ok(value.clone()),
+            CogState::Cancelled => Err(CogPoolError::TaskCancelled),
+            CogState::Paniced => Err(CogPoolError::TaskPanicked),
+        }
+    }
+
+    pub fn run(&mut self) -> Result<(), CogPoolError> {
         let func = std::mem::take(&mut self.func);
         if let Some(func) = func {
-            Ok(func())
+            println!("Running task {}", self.id);
+
+            let result = func();
+            let (lock, cvar) = &*self.done;
+            let mut done = lock.lock().unwrap();
+            *done = true;
+            cvar.notify_one();
+            self.state = CogState::Done(result);
+            Ok(())
         } else {
             Err(CogPoolError::TaskAlreadyRan)
         }

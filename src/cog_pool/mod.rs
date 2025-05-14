@@ -3,24 +3,16 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use crate::error::CogPoolError;
-use crate::task::Task;
-use crate::types::{CogType, TaskId};
-
-pub enum CogResult<T> {
-    Running,
-    Cancelled,
-    Paniced,
-    Ok(T),
-}
+use crate::task::{Cog, CogState};
+use crate::types::{CogId, CogType};
 
 pub struct CogPool<T>
 where
     T: CogType,
 {
-    id: TaskId,
-    tasks: Vec<Task<T, Box<dyn FnOnce() -> T + Send>>>,
+    id: CogId,
+    tasks: Arc<Mutex<HashMap<CogId, Arc<Mutex<Cog<T, Box<dyn FnOnce() -> T + Send>>>>>>>,
     runner: Option<JoinHandle<()>>,
-    results: Arc<Mutex<HashMap<TaskId, CogResult<T>>>>,
 }
 
 impl<T: CogType> Drop for CogPool<T> {
@@ -35,60 +27,79 @@ impl<T: CogType> CogPool<T> {
     pub fn new() -> Self {
         Self {
             id: 0,
-            tasks: Vec::new(),
+            tasks: Arc::new(Mutex::new(HashMap::new())),
             runner: None,
-            results: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    pub fn add_task<F>(&mut self, func: F) -> TaskId
+    pub fn add_task<F>(&mut self, func: F) -> CogId
     where
         F: FnOnce() -> T + Send + 'static,
     {
         let id = self.id;
-        self.tasks.push(Task::new(id, Box::new(func)));
+        self.tasks
+            .lock()
+            .unwrap()
+            .insert(id, Arc::new(Mutex::new(Cog::new(id, Box::new(func)))));
         self.id += 1;
         id
     }
 
-    pub fn get_result(&self, id: TaskId) -> Result<T, CogPoolError> {
-        if id > self.id - 1 {
-            return Err(CogPoolError::TaskNotFound(id));
-        }
-        let results = self.results.lock().unwrap();
-        match results.get(&id) {
-            Some(boxed_result) => match boxed_result {
-                CogResult::Ok(value) => Ok(value.clone()),
-                _ => todo!(),
-            },
+    pub fn get_result(&self, id: CogId) -> Result<T, CogPoolError> {
+        match self.tasks.lock().unwrap().get(&id) {
+            Some(task) => task.lock().unwrap().get_result(),
             None => Err(CogPoolError::TaskNotFound(id)),
         }
     }
 
-    pub fn wait_for_result(&self, id: TaskId) -> Result<T, CogPoolError> {
-        loop {
-            let results = self.results.lock().unwrap();
-            match results.get(&id) {
-                Some(boxed_result) => match boxed_result {
-                    CogResult::Ok(value) => return Ok(value.clone()),
+    pub fn wait_for_result(&self, id: CogId) -> Result<T, CogPoolError> {
+        let tasks = self.tasks.lock().unwrap();
+        match tasks.get(&id) {
+            Some(task) => {
+                let task_clone = task.clone();
+                let task = task.lock().unwrap();
+                match &task.state {
+                    CogState::Waiting => {
+                        let (lock, cvar) = &*task.done.clone();
+                        drop(task);
+                        drop(tasks);
+                        let mut started = lock.lock().unwrap();
+                        while !*started {
+                            started = cvar.wait(started).unwrap();
+                        }
+                        return task_clone.lock().unwrap().get_result();
+                    }
+                    CogState::Done(value) => return Ok(value.clone()),
                     _ => todo!(),
-                },
-                None => (),
-            };
+                }
+            }
+            None => Err(CogPoolError::TaskNotFound(id)),
         }
     }
 
     pub fn run(&mut self) {
-        let tasks = std::mem::take(&mut self.tasks);
-        let results: Arc<Mutex<HashMap<TaskId, CogResult<T>>>> = Arc::clone(&self.results);
+        let tasks = self.tasks.clone();
         self.runner = Some(std::thread::spawn(move || {
-            for mut task in tasks {
-                let id = task.id;
-                let result = match task.run() {
-                    Ok(result) => result,
-                    Err(_) => continue,
-                };
-                results.lock().unwrap().insert(id, CogResult::Ok(result));
+            loop {
+                let mut to_run = None;
+                let mut tasks = tasks.lock().unwrap();
+                for (_task_id, task) in tasks.iter_mut() {
+                    let task_clone = task.clone();
+                    let task = task.lock().unwrap();
+                    if let CogState::Waiting = task.state {
+                        to_run = Some(task_clone);
+                        break;
+                    }
+                }
+                drop(tasks);
+                if let Some(task) = to_run {
+                    let _result = match task.lock().unwrap().run() {
+                        Ok(()) => (),
+                        Err(_) => (),
+                    };
+                } else {
+                    return;
+                }
             }
         }));
     }
