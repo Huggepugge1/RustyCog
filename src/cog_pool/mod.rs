@@ -48,7 +48,7 @@ impl<T: CogType> CogPool<T> {
     pub fn get_result(&self, id: CogId) -> Result<T, CogPoolError> {
         match self.tasks.lock().unwrap().get(&id) {
             Some(task) => task.lock().unwrap().get_result(),
-            None => todo!(),
+            None => Err(CogPoolError::TaskNotFound(id)),
         }
     }
 
