@@ -13,8 +13,6 @@ fn main() {
 
     pool.run();
 
-    std::thread::sleep(std::time::Duration::from_micros(100));
-
     let result0 = pool.get_result(id0);
     let result1 = pool.get_result(id1);
 

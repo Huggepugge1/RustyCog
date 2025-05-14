@@ -47,25 +47,33 @@ impl<T: CogType> CogPool<T> {
 
     pub fn get_result(&self, id: CogId) -> Result<T, CogPoolError> {
         match self.tasks.lock().unwrap().get(&id) {
-            Some(task) => match &task.lock().unwrap().state {
-                CogState::Waiting => Err(CogPoolError::TaskNotCompleted),
-                CogState::Done(value) => Ok(value.clone()),
-                _ => todo!(),
-            },
+            Some(task) => task.lock().unwrap().get_result(),
             None => todo!(),
         }
     }
 
     pub fn wait_for_result(&self, id: CogId) -> Result<T, CogPoolError> {
-        loop {
-            match self.tasks.lock().unwrap().get(&id) {
-                Some(task) => match &task.lock().unwrap().state {
-                    CogState::Waiting => continue,
+        let tasks = self.tasks.lock().unwrap();
+        match tasks.get(&id) {
+            Some(task) => {
+                let task_clone = task.clone();
+                let task = task.lock().unwrap();
+                match &task.state {
+                    CogState::Waiting => {
+                        let (lock, cvar) = &*task.done.clone();
+                        drop(task);
+                        drop(tasks);
+                        let mut started = lock.lock().unwrap();
+                        while !*started {
+                            started = cvar.wait(started).unwrap();
+                        }
+                        return task_clone.lock().unwrap().get_result();
+                    }
                     CogState::Done(value) => return Ok(value.clone()),
                     _ => todo!(),
-                },
-                None => todo!(),
+                }
             }
+            None => Err(CogPoolError::TaskNotFound(id)),
         }
     }
 

@@ -51,6 +51,14 @@ where
         }
     }
 
+    pub fn get_result(&self) -> Result<T, CogPoolError> {
+        match &self.state {
+            CogState::Waiting => Err(CogPoolError::TaskNotCompleted),
+            CogState::Done(value) => Ok(value.clone()),
+            _ => todo!(),
+        }
+    }
+
     pub fn run(&mut self) -> Result<(), CogPoolError> {
         let func = std::mem::take(&mut self.func);
         if let Some(func) = func {
