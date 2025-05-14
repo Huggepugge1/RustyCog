@@ -1,16 +1,25 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum CogPoolError {
-    #[error("Task not found with ID: {0}")]
-    TaskNotFound(i32),
+pub enum CogError {
+    #[error("Cog not found with ID: {0}")]
+    NotFound(i32),
 
-    #[error("Type mismatch for task result. Found {0}")]
-    TypeMismatch(String),
+    #[error("Cog has not completed yet")]
+    NotCompleted,
 
-    #[error("Task has not completed yet")]
-    TaskNotCompleted,
+    #[error("Cog was cancelled")]
+    Cancelled,
 
-    #[error("Task already ran")]
-    TaskAlreadyRan,
+    #[error("Cog panicked")]
+    Panicked,
+
+    #[error("Cog already ran")]
+    AlreadyRan,
+}
+
+#[derive(Error, Debug)]
+pub enum MachineError {
+    #[error("CogError: {0}")]
+    CogError(#[from] CogError),
 }
