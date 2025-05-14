@@ -2,11 +2,18 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use crate::error::CogPoolError;
+use crate::error::MachineError;
 use crate::task::{Cog, CogState};
 use crate::types::{CogId, CogType};
 
-pub struct CogPool<T>
+pub enum CogResult<T> {
+    Running,
+    Cancelled,
+    Paniced,
+    Ok(T),
+}
+
+pub struct Machine<T>
 where
     T: CogType,
 {
@@ -15,7 +22,7 @@ where
     runner: Option<JoinHandle<()>>,
 }
 
-impl<T: CogType> Drop for CogPool<T> {
+impl<T: CogType> Drop for Machine<T> {
     fn drop(&mut self) {
         if let Some(runner) = self.runner.take() {
             runner.join().expect("Failed to join thread");
@@ -23,7 +30,7 @@ impl<T: CogType> Drop for CogPool<T> {
     }
 }
 
-impl<T: CogType> CogPool<T> {
+impl<T: CogType> Machine<T> {
     pub fn new() -> Self {
         Self {
             id: 0,

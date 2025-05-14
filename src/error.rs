@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum CogPoolError {
+pub enum MachineError {
     #[error("Task not found with ID: {0}")]
     TaskNotFound(i32),
 

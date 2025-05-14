@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    error::CogPoolError,
+    error::MachineError,
     types::{CogId, CogType},
 };
 
@@ -73,7 +73,7 @@ where
             self.state = CogState::Done(result);
             Ok(())
         } else {
-            Err(CogPoolError::TaskAlreadyRan)
+            Err(MachineError::TaskAlreadyRan)
         }
     }
 }

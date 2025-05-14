@@ -1,7 +1,7 @@
-use rustycog::cog_pool::CogPool;
+use rustycog::cog_pool::Machine;
 
 fn main() {
-    let mut pool = CogPool::<i32>::new();
+    let mut pool = Machine::<i32>::new();
     let id0 = pool.add_task(|| {
         println!("Hello World from task 0");
         33
