@@ -1,20 +1,29 @@
-use std::any::type_name;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::{any::Any, thread::JoinHandle};
+use std::thread::JoinHandle;
 
 use crate::error::CogPoolError;
 use crate::task::Task;
-use crate::types::TaskId;
+use crate::types::{CogType, TaskId};
 
-pub struct CogPool {
-    id: TaskId,
-    tasks: Vec<Task<Box<dyn Any + Send>>>,
-    runner: Option<JoinHandle<()>>,
-    results: Arc<Mutex<HashMap<TaskId, Box<dyn Any + Send>>>>,
+pub enum CogResult<T> {
+    Running,
+    Cancelled,
+    Paniced,
+    Ok(T),
 }
 
-impl Drop for CogPool {
+pub struct CogPool<T>
+where
+    T: CogType,
+{
+    id: TaskId,
+    tasks: Vec<Task<T, Box<dyn FnOnce() -> T + Send>>>,
+    runner: Option<JoinHandle<()>>,
+    results: Arc<Mutex<HashMap<TaskId, CogResult<T>>>>,
+}
+
+impl<T: CogType> Drop for CogPool<T> {
     fn drop(&mut self) {
         if let Some(runner) = self.runner.take() {
             runner.join().expect("Failed to join thread");
@@ -22,7 +31,7 @@ impl Drop for CogPool {
     }
 }
 
-impl CogPool {
+impl<T: CogType> CogPool<T> {
     pub fn new() -> Self {
         Self {
             id: 0,
@@ -32,59 +41,38 @@ impl CogPool {
         }
     }
 
-    pub fn add_task<T>(&mut self, func: T) -> TaskId
+    pub fn add_task<F>(&mut self, func: F) -> TaskId
     where
-        T: FnOnce() -> () + Send + 'static,
-    {
-        self.tasks
-            .push(Task::new(self.id, move || -> Box<dyn Any + Send> {
-                func();
-                Box::new(())
-            }));
-        self.id += 1;
-        self.id
-    }
-
-    pub fn add_task_with_result<T>(&mut self, func: T) -> TaskId
-    where
-        T: FnOnce() -> Box<dyn Any + Send> + Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
     {
         let id = self.id;
-        self.tasks.push(Task::new(id, func));
+        self.tasks.push(Task::new(id, Box::new(func)));
         self.id += 1;
         id
     }
 
-    pub fn get_result<T>(&self, id: TaskId) -> Result<T, CogPoolError>
-    where
-        T: Clone + 'static,
-    {
+    pub fn get_result(&self, id: TaskId) -> Result<T, CogPoolError> {
         if id > self.id - 1 {
             return Err(CogPoolError::TaskNotFound(id));
         }
         let results = self.results.lock().unwrap();
         match results.get(&id) {
-            Some(boxed_result) => boxed_result
-                .downcast_ref::<T>()
-                .cloned()
-                .ok_or(CogPoolError::TypeMismatch(type_name::<T>().to_string())),
-            None => Err(CogPoolError::TaskNotCompleted),
+            Some(boxed_result) => match boxed_result {
+                CogResult::Ok(value) => Ok(value.clone()),
+                _ => todo!(),
+            },
+            None => Err(CogPoolError::TaskNotFound(id)),
         }
     }
 
-    pub fn wait_for_result<T>(&self, id: TaskId) -> Result<T, CogPoolError>
-    where
-        T: Clone + 'static,
-    {
+    pub fn wait_for_result(&self, id: TaskId) -> Result<T, CogPoolError> {
         loop {
             let results = self.results.lock().unwrap();
             match results.get(&id) {
-                Some(boxed_result) => {
-                    return boxed_result
-                        .downcast_ref::<T>()
-                        .cloned()
-                        .ok_or(CogPoolError::TypeMismatch(type_name::<T>().to_string()));
-                }
+                Some(boxed_result) => match boxed_result {
+                    CogResult::Ok(value) => return Ok(value.clone()),
+                    _ => todo!(),
+                },
                 None => (),
             };
         }
@@ -92,12 +80,15 @@ impl CogPool {
 
     pub fn run(&mut self) {
         let tasks = std::mem::take(&mut self.tasks);
-        let results: Arc<Mutex<HashMap<TaskId, Box<dyn Any + Send>>>> = Arc::clone(&self.results);
+        let results: Arc<Mutex<HashMap<TaskId, CogResult<T>>>> = Arc::clone(&self.results);
         self.runner = Some(std::thread::spawn(move || {
-            for task in tasks {
+            for mut task in tasks {
                 let id = task.id;
-                let result = task.run();
-                results.lock().unwrap().insert(id, result);
+                let result = match task.run() {
+                    Ok(result) => result,
+                    Err(_) => continue,
+                };
+                results.lock().unwrap().insert(id, CogResult::Ok(result));
             }
         }));
     }

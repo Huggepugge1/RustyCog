@@ -10,4 +10,7 @@ pub enum CogPoolError {
 
     #[error("Task has not completed yet")]
     TaskNotCompleted,
+
+    #[error("Task already ran")]
+    TaskAlreadyRan,
 }
