@@ -11,7 +11,6 @@ use crate::{
 pub enum CogState<T> {
     Waiting,
     Running,
-    Cancelled,
     Panicked,
     Done(T),
 }
@@ -56,7 +55,6 @@ where
             CogState::Waiting | CogState::Running => Err(CogError::NotCompleted),
             CogState::Done(value) => Ok(value.clone()),
 
-            CogState::Cancelled => Err(CogError::Cancelled),
             CogState::Panicked => Err(CogError::Panicked),
         }
     }

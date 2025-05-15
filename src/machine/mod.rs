@@ -3,19 +3,17 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use crate::cog::{Cog, CogState};
-use crate::error::{CogError, MachineError};
+use crate::error::CogError;
 use crate::types::{CogId, CogType};
-
-pub enum CogResult<T> {
-    Running,
-    Cancelled,
-    Paniced,
-    Ok(T),
-}
 
 type CogFn<T> = Box<dyn FnOnce() -> T + Send + std::panic::UnwindSafe + 'static>;
 type ArcMutexCog<T> = Arc<Mutex<Cog<T, CogFn<T>>>>;
 
+/// RustyCogs task manager
+///
+/// The Machine manages the bolier (worker) and cogs (tasks)
+/// and provides some basic methods to initialize and insert cogs,
+/// as well as retrieving their results.
 pub struct Machine<T>
 where
     T: CogType,
@@ -35,6 +33,20 @@ impl<T: CogType> Drop for Machine<T> {
 }
 
 impl<T: CogType> Machine<T> {
+    /// Creates a new Machine
+    ///
+    /// Initialize a Machine without any cogs
+    ///
+    /// # Notes
+    /// - Each machine can only run cogs with the same return types.
+    ///
+    /// # Example
+    /// ```
+    /// use rustycog::Machine;
+    /// use std::any::Any;
+    ///
+    /// let i32_machine = Machine::<i32>::new();
+    /// ```
     pub fn new() -> Self {
         Self {
             cog_id: 0,
@@ -44,7 +56,24 @@ impl<T: CogType> Machine<T> {
         }
     }
 
-    pub fn add_cog<F>(&mut self, func: F) -> CogId
+    /// Insert a cog to the machine
+    ///
+    /// Inserts a cog (task) to the machine.
+    ///
+    /// # Notes:
+    /// - As of rustycog v0.1, the insert_cog does not engage (run) the cog
+    ///   In the future, insert_cog will schedule the cog for engagement
+    ///
+    /// # Example
+    /// ```
+    /// use rustycog::Machine;
+    ///
+    /// let mut machine = Machine::<i32>::new();
+    ///
+    /// let cog1_id = machine.insert_cog(|| {0});
+    /// let cog2_id = machine.insert_cog(|| {1});
+    /// ```
+    pub fn insert_cog<F>(&mut self, func: F) -> CogId
     where
         F: FnOnce() -> T + Send + std::panic::UnwindSafe + 'static,
     {
@@ -57,14 +86,68 @@ impl<T: CogType> Machine<T> {
         id
     }
 
-    pub fn get_result(&self, id: CogId) -> Result<T, MachineError> {
+    /// Get the Result of a cog
+    ///
+    /// # Errors
+    /// This function will return an error if:
+    /// - The cog has not been added to the machine (`CogError::NotFound`).
+    /// - The cog has not completed (`CogError::NotCompleted`).
+    /// - The cog panicked (`CogError::Panicked`).
+    ///
+    /// # Example
+    /// ```
+    /// use rustycog::Machine;
+    /// use rustycog::error::{CogError};
+    ///
+    /// let mut machine = Machine::<i32>::new();
+    ///
+    /// let cog_id = machine.insert_cog(|| {
+    ///     std::thread::sleep(std::time::Duration::from_secs(1));
+    ///     0
+    /// });
+    ///
+    /// machine.run();
+    ///
+    /// assert_eq!(machine.get_result(cog_id), Err(CogError::NotCompleted));
+    ///
+    /// // Ensure the cog finishes
+    /// std::thread::sleep(std::time::Duration::from_secs(3));
+    ///
+    /// assert_eq!(machine.get_result(cog_id), Ok(0));
+    /// ```
+    pub fn get_result(&self, id: CogId) -> Result<T, CogError> {
         match self.cogs.get(&id) {
             Some(cog) => Ok(cog.lock().unwrap().get_result()?),
-            None => Err(MachineError::CogError(CogError::NotFound(id))),
+            None => Err(CogError::NotInserted(id)),
         }
     }
 
-    pub fn wait_for_result(&self, id: CogId) -> Result<T, MachineError> {
+    /// Wait for the cog to finish, then get the result
+    ///
+    /// # Errors
+    /// This function will return an error if:
+    /// - The cog has not been added to the machine (`CogError::NotFound`).
+    /// - The cog panicked (`CogError::Panicked`).
+    ///
+    /// # Example
+    /// ```
+    /// use rustycog::Machine;
+    /// use rustycog::error::{CogError};
+    ///
+    /// let mut machine = Machine::<i32>::new();
+    ///
+    /// let cog1_id = machine.insert_cog(|| {0});
+    /// let cog2_id = machine.insert_cog(|| {
+    ///     panic!("I paniced :(");
+    ///     0
+    /// });
+    ///
+    /// machine.run();
+    ///
+    /// assert_eq!(machine.wait_for_result(cog1_id), Ok(0));
+    /// assert_eq!(machine.wait_for_result(cog2_id), Err(CogError::Panicked));
+    /// ```
+    pub fn wait_for_result(&self, id: CogId) -> Result<T, CogError> {
         match self.cogs.get(&id) {
             Some(cog) => {
                 let cog_clone = cog.clone();
@@ -79,14 +162,34 @@ impl<T: CogType> Machine<T> {
                         }
                         Ok(cog_clone.lock().unwrap().get_result()?)
                     }
-                    CogState::Done(value) => Ok(value.clone()),
-                    _ => todo!(),
+                    _ => Ok(cog.get_result()?),
                 }
             }
-            None => Err(MachineError::CogError(CogError::NotFound(id))),
+            None => Err(CogError::NotInserted(id)),
         }
     }
 
+    /// Starts the boilers, power up the machine and engage (execute) all the cogs
+    ///
+    /// **Warning**: This is an early prototype of rustycog and this function
+    /// will get replaced in the near future by cogs automatically getting
+    /// scheduled and engaging
+    ///
+    /// # Example
+    /// ```
+    /// use rustycog::Machine;
+    /// use rustycog::error::{CogError};
+    ///
+    /// let mut machine = Machine::<i32>::new();
+    ///
+    /// let cog1_id = machine.insert_cog(|| {0});
+    /// let cog2_id = machine.insert_cog(|| {
+    ///     panic!("I paniced :(");
+    ///     0
+    /// });
+    ///
+    /// machine.run();
+    /// ```
     pub fn run(&mut self) {
         let cogs = self.cog_queue.clone();
         self.boiler = Some(std::thread::spawn(move || {
