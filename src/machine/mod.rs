@@ -32,6 +32,12 @@ impl<T: CogType> Drop for Machine<T> {
     }
 }
 
+impl<T: CogType> Default for Machine<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: CogType> Machine<T> {
     /// Creates a new Machine
     ///
@@ -86,43 +92,49 @@ impl<T: CogType> Machine<T> {
         id
     }
 
-    /// Get the Result of a cog
+    /// Retrieves the result of a cog (task) by its ID, removing the cog once the result is
+    /// retrieved.
     ///
     /// # Errors
     /// This function will return an error if:
     /// - The cog has not been added to the machine (`CogError::NotFound`).
+    /// - The cog has already been retrieved (`CogError::NotFound`).
     /// - The cog has not completed (`CogError::NotCompleted`).
     /// - The cog panicked (`CogError::Panicked`).
     ///
     /// # Example
+    /// NOTE: The example uses wait_for_result() to retrieve the result of the cog.
+    /// This is to keep the program running synchronously
+    ///
     /// ```
     /// use rustycog::Machine;
-    /// use rustycog::error::{CogError};
+    /// use rustycog::error::CogError;
     ///
     /// let mut machine = Machine::<i32>::new();
-    ///
-    /// let cog_id = machine.insert_cog(|| {
-    ///     std::thread::sleep(std::time::Duration::from_secs(1));
-    ///     0
-    /// });
-    ///
+    /// let id = machine.insert_cog(|| 42);
     /// machine.run();
     ///
-    /// assert_eq!(machine.get_result(cog_id), Err(CogError::NotCompleted));
+    /// // First retrieval - succeeds
+    /// assert_eq!(machine.wait_for_result(id), Ok(42));
     ///
-    /// // Ensure the cog finishes
-    /// std::thread::sleep(std::time::Duration::from_secs(3));
-    ///
-    /// assert_eq!(machine.get_result(cog_id), Ok(0));
-    /// ```
-    pub fn get_result(&self, id: CogId) -> Result<T, CogError> {
-        match self.cogs.get(&id) {
-            Some(cog) => Ok(cog.lock().unwrap().get_result()?),
+    /// // Second retrieval - cog is already removed
+    /// assert_eq!(machine.wait_for_result(id), Err(CogError::NotInserted(id)));
+    pub fn get_result(&mut self, id: CogId) -> Result<T, CogError> {
+        let result = match self.cogs.get(&id) {
+            Some(cog) => cog.lock().unwrap().get_result(),
             None => Err(CogError::NotInserted(id)),
+        };
+        match result {
+            Ok(_) | Err(CogError::Panicked) => {
+                self.cogs.remove(&id);
+            }
+            _ => (),
         }
+        result
     }
 
-    /// Wait for the cog to finish, then get the result
+    /// Waits for the result of a cog (task) by its ID, removing the cog once the result is
+    /// retrieved.
     ///
     /// # Errors
     /// This function will return an error if:
@@ -132,7 +144,7 @@ impl<T: CogType> Machine<T> {
     /// # Example
     /// ```
     /// use rustycog::Machine;
-    /// use rustycog::error::{CogError};
+    /// use rustycog::error::CogError;
     ///
     /// let mut machine = Machine::<i32>::new();
     ///
@@ -146,27 +158,32 @@ impl<T: CogType> Machine<T> {
     ///
     /// assert_eq!(machine.wait_for_result(cog1_id), Ok(0));
     /// assert_eq!(machine.wait_for_result(cog2_id), Err(CogError::Panicked));
+    /// // Second retrieval - cog is already removed
+    /// assert_eq!(machine.wait_for_result(cog2_id), Err(CogError::NotInserted(cog2_id)));
     /// ```
-    pub fn wait_for_result(&self, id: CogId) -> Result<T, CogError> {
-        match self.cogs.get(&id) {
-            Some(cog) => {
-                let cog_clone = cog.clone();
-                let cog = cog.lock().unwrap();
-                match &cog.state {
-                    CogState::Waiting => {
-                        let (lock, cvar) = &*cog.done.clone();
-                        drop(cog);
-                        let mut started = lock.lock().unwrap();
-                        while !*started {
-                            started = cvar.wait(started).unwrap();
-                        }
-                        Ok(cog_clone.lock().unwrap().get_result()?)
-                    }
-                    _ => Ok(cog.get_result()?),
+    pub fn wait_for_result(&mut self, id: CogId) -> Result<T, CogError> {
+        let cog = self.cogs.get(&id).ok_or(CogError::NotInserted(id))?;
+
+        {
+            let locked_cog = cog.lock().unwrap();
+            if let CogState::Waiting = &locked_cog.state {
+                let (lock, cvar) = &*locked_cog.done.clone();
+                // Let the cog be run
+                drop(locked_cog);
+
+                let mut started = lock.lock().unwrap();
+                while !*started {
+                    started = cvar.wait(started).unwrap();
                 }
-            }
-            None => Err(CogError::NotInserted(id)),
+            };
         }
+
+        let result = cog.lock().unwrap().get_result();
+
+        if matches!(result, Ok(_) | Err(CogError::Panicked)) {
+            self.cogs.remove(&id);
+        }
+        result
     }
 
     /// Starts the boilers, power up the machine and engage (execute) all the cogs
@@ -194,14 +211,9 @@ impl<T: CogType> Machine<T> {
         let cogs = self.cog_queue.clone();
         self.boiler = Some(std::thread::spawn(move || {
             loop {
-                let mut cogs = cogs.lock().unwrap();
-                let to_run = cogs.pop_front();
-                drop(cogs);
+                let to_run = cogs.lock().unwrap().pop_front();
                 if let Some(cog) = to_run {
-                    let _result = match cog.lock().unwrap().run() {
-                        Ok(()) => (),
-                        Err(_) => (),
-                    };
+                    let _ = cog.lock().unwrap().run();
                 } else {
                     return;
                 }

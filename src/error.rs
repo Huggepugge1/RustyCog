@@ -6,7 +6,7 @@ pub enum CogError {
     /// The specified Cog (task) ID was not found in the Machine.
     ///
     /// This error typically occurs when trying to get the result of a Cog
-    /// that was never inserted.
+    /// that was never inserted or has already been removed.
     ///
     /// # Example
     /// ```
@@ -19,6 +19,15 @@ pub enum CogError {
     /// ```
     #[error("Cog not found with ID: {0}")]
     NotInserted(i32),
+
+    /// The Cog (task) has been marked as removed from it's Machine but the Cog
+    /// was still in the Machine and the Machine tried to access it.
+    ///
+    /// This error indicates that the Cog was accessed after the Cog was removed
+    /// from the machine which is typically a bug in the internal logic of RustyCog.
+    /// Please report this if encountered.
+    #[error("Cog has not completed yet")]
+    Removed,
 
     /// The Cog (task) has not yet completed its execution.
     ///

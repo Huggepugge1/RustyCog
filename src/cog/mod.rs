@@ -12,13 +12,14 @@ pub enum CogState<T> {
     Waiting,
     Running,
     Panicked,
+    Removed,
     Done(T),
 }
 
 pub struct Cog<T, F>
 where
     T: CogType,
-    F: FnOnce() -> T,
+    F: FnOnce() -> T + std::panic::UnwindSafe,
 {
     pub id: CogId,
     pub done: Arc<(Mutex<bool>, Condvar)>,
@@ -29,7 +30,7 @@ where
 impl<T, F> Debug for Cog<T, F>
 where
     T: CogType,
-    F: FnOnce() -> T,
+    F: FnOnce() -> T + std::panic::UnwindSafe,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
         f.debug_struct("Cog").field("id", &self.id).finish()
@@ -50,40 +51,46 @@ where
         }
     }
 
-    pub fn get_result(&self) -> Result<T, CogError> {
-        match &self.state {
-            CogState::Waiting | CogState::Running => Err(CogError::NotCompleted),
-            CogState::Done(value) => Ok(value.clone()),
+    pub fn get_result(&mut self) -> Result<T, CogError> {
+        match self.state {
+            CogState::Done(_) | CogState::Panicked => {
+                // Replace needs to happen since we want to move the result from Done
+                // This way, in a Machine<T>, T does not have to implement Clone or Copy
+                match std::mem::replace(&mut self.state, CogState::Removed) {
+                    CogState::Done(result) => Ok(result),
+                    CogState::Panicked => Err(CogError::Panicked),
+                    _ => unreachable!(),
+                }
+            }
 
-            CogState::Panicked => Err(CogError::Panicked),
+            CogState::Removed => Err(CogError::Removed),
+            CogState::Waiting | CogState::Running => Err(CogError::NotCompleted),
         }
     }
 
     pub fn run(&mut self) -> Result<(), CogError> {
         self.state = CogState::Running;
-        let func = std::mem::take(&mut self.func);
-        if let Some(func) = func {
-            println!("Running cog {}", self.id);
 
-            let result = match std::panic::catch_unwind(func) {
-                Ok(result) => result,
-                Err(_err) => {
-                    self.state = CogState::Panicked;
-                    let (lock, cvar) = &*self.done;
-                    let mut done = lock.lock().unwrap();
-                    *done = true;
-                    cvar.notify_one();
-                    return Err(CogError::Panicked);
-                }
-            };
-            let (lock, cvar) = &*self.done;
-            let mut done = lock.lock().unwrap();
-            *done = true;
-            cvar.notify_one();
-            self.state = CogState::Done(result);
-            Ok(())
-        } else {
-            Err(CogError::AlreadyRan)
-        }
+        let func = std::mem::take(&mut self.func).ok_or(CogError::AlreadyRan)?;
+        let result = match std::panic::catch_unwind(func) {
+            Ok(result) => {
+                self.state = CogState::Done(result);
+                Ok(())
+            }
+            Err(_err) => {
+                self.state = CogState::Panicked;
+                Err(CogError::Panicked)
+            }
+        };
+
+        self.notify_done();
+        result
+    }
+
+    fn notify_done(&mut self) {
+        let (lock, cvar) = &*self.done;
+        let mut done = lock.lock().unwrap();
+        *done = true;
+        cvar.notify_one();
     }
 }
