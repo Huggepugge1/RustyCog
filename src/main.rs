@@ -6,7 +6,7 @@ fn main() {
     let cogs = 1_000_000;
 
     for i in 0..cogs {
-        machine.add_cog(move || i);
+        machine.insert_cog(move || i);
     }
 
     machine.run();
