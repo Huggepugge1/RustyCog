@@ -5,3 +5,18 @@ edition = "2024"
 
 [dependencies]
 thiserror = "2.0.12"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "insert"
+harness = false
+
+[[bench]]
+name = "engage"
+harness = false
+
+[[bench]]
+name = "retrieve"
+harness = false

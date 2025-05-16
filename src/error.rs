@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::types::CogId;
+
 /// Represents errors that can occur when interacting with a Cog (task).
 #[derive(Error, Debug, PartialEq)]
 pub enum CogError {
@@ -12,13 +14,13 @@ pub enum CogError {
     /// ```
     /// use rustycog::{Machine, error::CogError};
     ///
-    /// let mut machine = Machine::<i32>::new();
+    /// let mut machine = Machine::<i32>::default();
     /// let non_existent_id = 999;
     ///
     /// assert_eq!(machine.get_result(non_existent_id), Err(CogError::NotInserted(999)));
     /// ```
     #[error("Cog not found with ID: {0}")]
-    NotInserted(i32),
+    NotInserted(CogId),
 
     /// The Cog (task) has been marked as removed from it's Machine but the Cog
     /// was still in the Machine and the Machine tried to access it.
@@ -37,13 +39,11 @@ pub enum CogError {
     /// ```
     /// use rustycog::{Machine, error::CogError};
     ///
-    /// let mut machine = Machine::<i32>::new();
+    /// let mut machine = Machine::<i32>::default();
     /// let cog_id = machine.insert_cog(|| {
     ///     std::thread::sleep(std::time::Duration::from_secs(2));
     ///     42
     /// });
-    ///
-    /// machine.run();
     ///
     /// assert_eq!(machine.get_result(cog_id), Err(CogError::NotCompleted));
     /// ```
@@ -58,10 +58,8 @@ pub enum CogError {
     /// ```
     /// use rustycog::{Machine, error::CogError};
     ///
-    /// let mut machine = Machine::<i32>::new();
+    /// let mut machine = Machine::<i32>::default();
     /// let cog_id = machine.insert_cog(|| panic!("Task panicked :("));
-    ///
-    /// machine.run();
     ///
     /// assert_eq!(machine.wait_for_result(cog_id), Err(CogError::Panicked));
     /// ```
