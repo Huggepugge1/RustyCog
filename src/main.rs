@@ -1,19 +1,18 @@
 use rustycog::Machine;
 
 fn main() {
-    let mut machine = Machine::<i32>::powered(8);
+    let mut machine = Machine::<usize>::powered(8);
 
-    let cogs = 10;
+    let cogs = 1000;
 
     for i in 0..cogs {
-        machine.insert_cog(move || {
-            println!("Cog: {i}");
-            i
-        });
+        machine.insert_cog(move || i);
+        // std::thread::sleep(std::time::Duration::from_secs(1));
     }
 
     for i in 0..cogs {
-        println!("Result: {}", machine.wait_for_result(i).unwrap());
+        let _result = machine.wait_for_result(i);
+        // println!("Result: {:?}", result);
     }
 
     // std::thread::sleep(std::time::Duration::from_secs(10));

@@ -1,10 +1,12 @@
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
+use std::collections::HashMap;
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 
-use crate::cog::{Cog, CogState};
-use crate::error::CogError;
-use crate::types::{CogId, CogType};
+use crate::{
+    cog::{Cog, CogState},
+    engine::Engine,
+    error::CogError,
+    types::{CogId, CogType, EngineId},
+};
 
 type CogFn<T> = Box<dyn FnOnce() -> T + Send + std::panic::UnwindSafe + 'static>;
 type ArcMutexCog<T> = Arc<Mutex<Cog<T, CogFn<T>>>>;
@@ -19,16 +21,21 @@ where
     T: CogType,
 {
     cog_id: CogId,
+    engine_id: EngineId,
+
     cogs: HashMap<CogId, ArcMutexCog<T>>,
-    cog_queue: Arc<Mutex<VecDeque<ArcMutexCog<T>>>>,
-    engines: Vec<JoinHandle<()>>,
+
+    max_engines: u32,
+    engines: Arc<RwLock<Vec<Arc<RwLock<Engine<T>>>>>>,
+    work: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl<T: CogType> Drop for Machine<T> {
     fn drop(&mut self) {
-        // for engine in std::mem::take(&mut self.engines) {
-        //     engine.join().expect("Failed to join thread");
-        // }
+        let engines = std::mem::take(&mut self.engines);
+        for engine in engines.read().unwrap().iter() {
+            engine.write().unwrap().kill();
+        }
     }
 }
 
@@ -55,28 +62,42 @@ impl<T: CogType> Machine<T> {
     pub fn powered(max_engines: u32) -> Self {
         let mut machine = Self {
             cog_id: 0,
+            engine_id: 0,
+
+            max_engines,
+
+            engines: Arc::new(RwLock::new(Vec::new())),
             cogs: HashMap::new(),
-            cog_queue: Arc::new(Mutex::new(VecDeque::new())),
-            engines: Vec::new(),
+            work: Arc::new((Mutex::new(false), Condvar::new())),
         };
 
         machine.spawn_engines(max_engines);
         machine
     }
 
+    /// TODO: Write documentation
+    pub fn cold(max_engines: u32) -> Self {
+        Self {
+            cog_id: 0,
+            engine_id: 0,
+
+            cogs: HashMap::new(),
+
+            max_engines,
+            engines: Arc::new(RwLock::new(Vec::new())),
+            work: Arc::new((Mutex::new(false), Condvar::new())),
+        }
+    }
+
     fn spawn_engines(&mut self, amount: u32) {
         for _ in 0..amount {
-            let cogs = self.cog_queue.clone();
-            self.engines.push(std::thread::spawn(move || {
-                loop {
-                    let to_run = cogs.lock().unwrap().pop_front();
-                    if let Some(cog) = to_run {
-                        let _ = cog.lock().unwrap().run();
-                    } else {
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                    }
-                }
-            }));
+            let engines = self.engines.clone();
+            self.engines.write().unwrap().push(Engine::new(
+                self.engine_id,
+                engines,
+                self.work.clone(),
+            ));
+            self.engine_id += 1;
         }
     }
 
@@ -104,10 +125,29 @@ impl<T: CogType> Machine<T> {
         let id = self.cog_id;
         let cog: ArcMutexCog<T> = Arc::new(Mutex::new(Cog::new(id, Box::new(func))));
         self.cogs.insert(id, cog.clone());
-        self.cog_queue.lock().unwrap().push_back(cog);
+        self.distribute_cog(cog);
 
         self.cog_id += 1;
         id
+    }
+
+    fn distribute_cog(&self, cog: ArcMutexCog<T>) {
+        let cog_id = cog.lock().unwrap().id;
+        if self.engines.read().unwrap().len() > 0 {
+            let engine =
+                self.engines.read().unwrap()[cog_id % self.engines.read().unwrap().len()].clone();
+            let engine = engine.write().unwrap();
+            engine.local_queue.write().unwrap().push_back(cog);
+
+            self.notify_work();
+        }
+    }
+
+    fn notify_work(&self) {
+        let (lock, cvar) = &*self.work;
+        let mut work = lock.lock().unwrap();
+        *work = true;
+        cvar.notify_all();
     }
 
     /// Retrieves the result of a cog (task) by its ID, removing the cog once the result is
@@ -199,5 +239,19 @@ impl<T: CogType> Machine<T> {
             self.cogs.remove(&id);
         }
         result
+    }
+
+    /// TODO: Write Documentation
+    pub fn wait_until_done(&mut self) {
+        loop {
+            for (_, cog) in self.cogs.iter() {
+                if let CogState::Done(_) = &cog.lock().unwrap().state {
+                } else {
+                    // std::thread::sleep(std::time::Duration::from_millis(1));
+                    continue;
+                }
+            }
+            return;
+        }
     }
 }

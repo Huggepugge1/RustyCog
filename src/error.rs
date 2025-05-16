@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::types::CogId;
+
 /// Represents errors that can occur when interacting with a Cog (task).
 #[derive(Error, Debug, PartialEq)]
 pub enum CogError {
@@ -18,7 +20,7 @@ pub enum CogError {
     /// assert_eq!(machine.get_result(non_existent_id), Err(CogError::NotInserted(999)));
     /// ```
     #[error("Cog not found with ID: {0}")]
-    NotInserted(i32),
+    NotInserted(CogId),
 
     /// The Cog (task) has been marked as removed from it's Machine but the Cog
     /// was still in the Machine and the Machine tried to access it.

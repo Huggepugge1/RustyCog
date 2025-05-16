@@ -64,9 +64,10 @@
 //! RustyCog provides error handling through `CogError`.
 
 mod cog;
+mod engine;
 pub mod error;
 mod machine;
-mod types;
+pub mod types;
 
 #[doc(inline)]
 pub use crate::machine::Machine;
