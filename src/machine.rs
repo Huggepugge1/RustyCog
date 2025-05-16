@@ -11,7 +11,7 @@ type ArcMutexCog<T> = Arc<Mutex<Cog<T, CogFn<T>>>>;
 
 /// RustyCogs task manager
 ///
-/// The Machine manages the bolier (worker) and cogs (tasks)
+/// The Machine manages the engine (worker) and cogs (tasks)
 /// and provides some basic methods to initialize and insert cogs,
 /// as well as retrieving their results.
 pub struct Machine<T>
@@ -21,27 +21,27 @@ where
     cog_id: CogId,
     cogs: HashMap<CogId, ArcMutexCog<T>>,
     cog_queue: Arc<Mutex<VecDeque<ArcMutexCog<T>>>>,
-    boiler: Option<JoinHandle<()>>,
+    engines: Vec<JoinHandle<()>>,
 }
 
 impl<T: CogType> Drop for Machine<T> {
     fn drop(&mut self) {
-        if let Some(runner) = self.boiler.take() {
-            runner.join().expect("Failed to join thread");
-        }
+        // for engine in std::mem::take(&mut self.engines) {
+        //     engine.join().expect("Failed to join thread");
+        // }
     }
 }
 
 impl<T: CogType> Default for Machine<T> {
     fn default() -> Self {
-        Self::new()
+        Self::powered(1)
     }
 }
 
 impl<T: CogType> Machine<T> {
-    /// Creates a new Machine
+    /// Creates a new, powered Machine
     ///
-    /// Initialize a Machine without any cogs
+    /// Initialize a Machine without any cogs with the boilers already running
     ///
     /// # Notes
     /// - Each machine can only run cogs with the same return types.
@@ -49,16 +49,34 @@ impl<T: CogType> Machine<T> {
     /// # Example
     /// ```
     /// use rustycog::Machine;
-    /// use std::any::Any;
     ///
-    /// let i32_machine = Machine::<i32>::new();
+    /// let i32_machine = Machine::<i32>::powered(4);
     /// ```
-    pub fn new() -> Self {
-        Self {
+    pub fn powered(max_engines: u32) -> Self {
+        let mut machine = Self {
             cog_id: 0,
             cogs: HashMap::new(),
             cog_queue: Arc::new(Mutex::new(VecDeque::new())),
-            boiler: None,
+            engines: Vec::new(),
+        };
+
+        machine.spawn_engines(max_engines);
+        machine
+    }
+
+    fn spawn_engines(&mut self, amount: u32) {
+        for _ in 0..amount {
+            let cogs = self.cog_queue.clone();
+            self.engines.push(std::thread::spawn(move || {
+                loop {
+                    let to_run = cogs.lock().unwrap().pop_front();
+                    if let Some(cog) = to_run {
+                        let _ = cog.lock().unwrap().run();
+                    } else {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                }
+            }));
         }
     }
 
@@ -74,7 +92,7 @@ impl<T: CogType> Machine<T> {
     /// ```
     /// use rustycog::Machine;
     ///
-    /// let mut machine = Machine::<i32>::new();
+    /// let mut machine = Machine::<i32>::default();
     ///
     /// let cog1_id = machine.insert_cog(|| {0});
     /// let cog2_id = machine.insert_cog(|| {1});
@@ -110,9 +128,8 @@ impl<T: CogType> Machine<T> {
     /// use rustycog::Machine;
     /// use rustycog::error::CogError;
     ///
-    /// let mut machine = Machine::<i32>::new();
+    /// let mut machine = Machine::<i32>::default();
     /// let id = machine.insert_cog(|| 42);
-    /// machine.run();
     ///
     /// // First retrieval - succeeds
     /// assert_eq!(machine.wait_for_result(id), Ok(42));
@@ -146,15 +163,13 @@ impl<T: CogType> Machine<T> {
     /// use rustycog::Machine;
     /// use rustycog::error::CogError;
     ///
-    /// let mut machine = Machine::<i32>::new();
+    /// let mut machine = Machine::<i32>::default();
     ///
     /// let cog1_id = machine.insert_cog(|| {0});
     /// let cog2_id = machine.insert_cog(|| {
     ///     panic!("I paniced :(");
     ///     0
     /// });
-    ///
-    /// machine.run();
     ///
     /// assert_eq!(machine.wait_for_result(cog1_id), Ok(0));
     /// assert_eq!(machine.wait_for_result(cog2_id), Err(CogError::Panicked));
@@ -184,40 +199,5 @@ impl<T: CogType> Machine<T> {
             self.cogs.remove(&id);
         }
         result
-    }
-
-    /// Starts the boilers, power up the machine and engage (execute) all the cogs
-    ///
-    /// **Warning**: This is an early prototype of rustycog and this function
-    /// will get replaced in the near future by cogs automatically getting
-    /// scheduled and engaging
-    ///
-    /// # Example
-    /// ```
-    /// use rustycog::Machine;
-    /// use rustycog::error::{CogError};
-    ///
-    /// let mut machine = Machine::<i32>::new();
-    ///
-    /// let cog1_id = machine.insert_cog(|| {0});
-    /// let cog2_id = machine.insert_cog(|| {
-    ///     panic!("I paniced :(");
-    ///     0
-    /// });
-    ///
-    /// machine.run();
-    /// ```
-    pub fn run(&mut self) {
-        let cogs = self.cog_queue.clone();
-        self.boiler = Some(std::thread::spawn(move || {
-            loop {
-                let to_run = cogs.lock().unwrap().pop_front();
-                if let Some(cog) = to_run {
-                    let _ = cog.lock().unwrap().run();
-                } else {
-                    return;
-                }
-            }
-        }));
     }
 }
