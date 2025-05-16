@@ -20,3 +20,6 @@ harness = false
 [[bench]]
 name = "retrieve"
 harness = false
+
+[profile.bench]
+debug = true

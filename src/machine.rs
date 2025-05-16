@@ -131,6 +131,23 @@ impl<T: CogType> Machine<T> {
         id
     }
 
+    pub fn insert_cog_batch<F>(&mut self, funcs: Vec<F>) -> CogId
+    where
+        F: FnOnce() -> T + Send + std::panic::UnwindSafe + 'static,
+    {
+        let id = self.cog_id;
+        let mut cog_batch = Vec::new();
+        for func in funcs {
+            let cog: ArcMutexCog<T> = Arc::new(Mutex::new(Cog::new(id, Box::new(func))));
+            self.cogs.insert(id, cog.clone());
+            cog_batch.push(cog);
+        }
+        self.distribute_cog_batch(cog_batch);
+
+        self.cog_id += 1;
+        id
+    }
+
     fn distribute_cog(&self, cog: ArcMutexCog<T>) {
         let cog_id = cog.lock().unwrap().id;
         if self.engines.read().unwrap().len() > 0 {
@@ -138,6 +155,18 @@ impl<T: CogType> Machine<T> {
                 self.engines.read().unwrap()[cog_id % self.engines.read().unwrap().len()].clone();
             let engine = engine.write().unwrap();
             engine.local_queue.write().unwrap().push_back(cog);
+
+            self.notify_work();
+        }
+    }
+
+    fn distribute_cog_batch(&self, cogs: Vec<ArcMutexCog<T>>) {
+        let cog_id = cogs[0].lock().unwrap().id;
+        if self.engines.read().unwrap().len() > 0 {
+            let engine =
+                self.engines.read().unwrap()[cog_id % self.engines.read().unwrap().len()].clone();
+            let engine = engine.write().unwrap();
+            engine.local_queue.write().unwrap().extend(cogs);
 
             self.notify_work();
         }

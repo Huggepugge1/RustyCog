@@ -42,7 +42,7 @@ where
 
             local_queue: Arc::new(RwLock::new(VecDeque::new())),
 
-            engines: engines,
+            engines,
 
             handle: None,
             termination_flag: Arc::new(RwLock::new(false)),
@@ -68,8 +68,8 @@ where
                 }
                 if let Some(cog) = local_queue.write().unwrap().pop_front() {
                     let _ = cog.lock().unwrap().run();
-                } else if let Some(cog) = Self::cog_steal(&engines, &arc_pointer) {
-                    let _ = cog.lock().unwrap().run();
+                } else if let Some(cogs) = Self::cog_steal(&engines, &arc_pointer) {
+                    local_queue.write().unwrap().extend(cogs);
                 } else {
                     let (lock, cvar) = &*work;
                     let mut ready = lock.lock().unwrap();
@@ -85,19 +85,20 @@ where
     fn cog_steal(
         engines: &Arc<RwLock<Vec<Arc<RwLock<Engine<T>>>>>>,
         self_pointer: &Arc<RwLock<Self>>,
-    ) -> Option<ArcMutexCog<T>> {
+    ) -> Option<VecDeque<ArcMutexCog<T>>> {
         for engine in engines.read().unwrap().iter() {
             if Arc::ptr_eq(engine, self_pointer) {
                 continue;
             }
-            if engine.read().unwrap().local_queue.read().unwrap().len() > 0 {
-                return engine
-                    .read()
-                    .unwrap()
-                    .local_queue
-                    .write()
-                    .unwrap()
-                    .pop_front();
+            let engine = engine.read().unwrap();
+            let mut queue = engine.local_queue.write().unwrap();
+            let len = queue.len();
+            if len > 0 {
+                return Some(
+                    queue
+                        .drain(0..usize::max(1, len / engines.read().unwrap().len()))
+                        .collect(),
+                );
             }
         }
         None
