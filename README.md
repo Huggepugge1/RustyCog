@@ -20,14 +20,9 @@ use rustycog::Machine;
 let mut machine = Machine::<i32>::new();
 let id0 = machine.insert_cog(|| 42);
 let id1 = machine.insert_cog(|| {
-    println!("Running a task...");
+    println!("Running task...");
     99
 });
-
-// NOTE: In RustyCog 0.2.0 Machine::run() will be deprecated.
-// Use Machine::start() instead
-// But as of RustyCog 0.1.0, Machine::run() is the way to go
-machine.run();
 
 println!("Result of cog 0: {:?}", machine.wait_for_result(id0)); // Ok(42)
 println!("Result of cog 1: {:?}", machine.wait_for_result(id1)); // Ok(99)
@@ -46,7 +41,6 @@ fn main() {
         panic!("Oh no!");
     });
 
-    machine.run();
     match machine.wait_for_result(id) {
         Ok(result) => println!("Result: {}", result),
         Err(CogError::Panicked) => println!("The cog panicked!"),
@@ -56,12 +50,10 @@ fn main() {
 ```
 
 ## Future Plans
-- Dynamic Boiler Management: Automatically adjust the amount of background threads
+- Dynamic Engine Management: Automatically adjust the amount of background threads
   depending on the current workload.
 - Prioritization: Allowing certain cogs to be prioritized. For example a cog
   currently being waited for will get priority for decreased response times
-- Immediate Cog Engagement: Remove the hassle of starting the boilers yourself.
-  Cogs engage as soon as they can after being inserted into the machine.
 - Cancel cogs at any time
 
 ## Why Choose RustyCog?
