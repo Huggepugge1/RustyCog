@@ -3,7 +3,7 @@ use rustycog::Machine;
 fn main() {
     let mut machine = Machine::<usize>::powered(8);
 
-    let cogs = 10;
+    let cogs = 1000;
 
     for i in 0..cogs {
         machine.insert_cog(move || i);

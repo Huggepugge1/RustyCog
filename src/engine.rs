@@ -58,7 +58,7 @@ where
         let local_queue = self.local_queue.clone();
         let termination_flag = self.termination_flag.clone();
         let engines = self.engines.clone();
-        let id = self._id;
+        // let id = self._id;
         let work = self.work.clone();
 
         std::thread::spawn(move || {
@@ -71,12 +71,12 @@ where
                 } else if let Some(cog) = Self::cog_steal(&engines, &arc_pointer) {
                     let _ = cog.lock().unwrap().run();
                 } else {
-                    // let (lock, cvar) = &*work;
-                    // let mut ready = lock.lock().unwrap();
-                    // while !*ready && !*termination_flag.read().unwrap() {
-                    //     ready = cvar.wait(ready).unwrap();
-                    // }
-                    // *ready = false;
+                    let (lock, cvar) = &*work;
+                    let mut ready = lock.lock().unwrap();
+                    while !*ready && !*termination_flag.read().unwrap() {
+                        ready = cvar.wait(ready).unwrap();
+                    }
+                    *ready = false;
                 }
             }
         })
