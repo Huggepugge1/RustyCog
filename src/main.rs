@@ -14,8 +14,8 @@ fn main() {
     }
 
     for i in 0..cogs {
-        let _result = machine.wait_for_result(i);
-        // println!("Result: {:?}", result);
+        let result = machine.wait_for_result(i);
+        println!("Result: {:?}", result);
     }
 
     // std::thread::sleep(std::time::Duration::from_secs(10));

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 
+use crate::error::MachineError;
 use crate::{
     cog::{Cog, CogState},
     engine::Engine,
@@ -39,16 +40,10 @@ impl<T: CogType> Drop for Machine<T> {
     }
 }
 
-impl<T: CogType> Default for Machine<T> {
-    fn default() -> Self {
-        Self::powered(1)
-    }
-}
-
 impl<T: CogType> Machine<T> {
     /// Creates a new, powered Machine
     ///
-    /// Initialize a Machine without any cogs with the boilers already running
+    /// Initialize a Machine without any cogs with the engines already running
     ///
     /// # Notes
     /// - Each machine can only run cogs with the same return types.
@@ -75,7 +70,20 @@ impl<T: CogType> Machine<T> {
         machine
     }
 
-    /// TODO: Write documentation
+    /// Creates a new, cold Machine
+    ///
+    /// Initialize a Machine without any cogs and no engines running.
+    /// To begin running cogs, Machine::power() must be called.
+    ///
+    /// # Notes
+    /// - Each machine can only run cogs with the same return types.
+    ///
+    /// # Example
+    /// ```
+    /// use rustycog::Machine;
+    ///
+    /// let i32_machine = Machine::<i32>::cold(4);
+    /// ```
     pub fn cold(max_engines: u32) -> Self {
         Self {
             cog_id: 0,
@@ -86,6 +94,34 @@ impl<T: CogType> Machine<T> {
             max_engines,
             engines: Arc::new(RwLock::new(Vec::new())),
             work: Arc::new((Mutex::new(false), Condvar::new())),
+        }
+    }
+
+    /// Power on a cold Machine
+    ///
+    /// A machine being powered means the machine can run cogs.
+    ///
+    /// # Errors
+    /// This function will return an error if:
+    /// - The machine is already powered (`MachineError::AlreadyPowered`)
+    ///
+    /// # Example
+    /// ```
+    /// use rustycog::{Machine, error::MachineError};
+    /// let mut machine = Machine::<i32>::cold(4);
+    ///
+    /// let powered = machine.power();
+    /// assert_eq!(powered, Ok(()));
+    ///
+    /// let powered = machine.power();
+    /// assert_eq!(powered, Err(MachineError::AlreadyPowered));
+    /// ```
+    pub fn power(&mut self) -> Result<(), MachineError> {
+        if self.engines.read().unwrap().len() == 0 {
+            self.spawn_engines(self.max_engines);
+            Ok(())
+        } else {
+            Err(MachineError::AlreadyPowered)
         }
     }
 
@@ -101,19 +137,15 @@ impl<T: CogType> Machine<T> {
         }
     }
 
-    /// Insert a cog to the machine
+    /// Insert a cog into the machine
     ///
-    /// Inserts a cog (task) to the machine.
-    ///
-    /// # Notes:
-    /// - As of rustycog v0.1, the insert_cog does not engage (run) the cog
-    ///   In the future, insert_cog will schedule the cog for engagement
+    /// Inserts a cog (task) into the machine.
     ///
     /// # Example
     /// ```
     /// use rustycog::Machine;
     ///
-    /// let mut machine = Machine::<i32>::default();
+    /// let mut machine = Machine::powered(4);
     ///
     /// let cog1_id = machine.insert_cog(|| {0});
     /// let cog2_id = machine.insert_cog(|| {1});
@@ -197,7 +229,7 @@ impl<T: CogType> Machine<T> {
     /// use rustycog::Machine;
     /// use rustycog::error::CogError;
     ///
-    /// let mut machine = Machine::<i32>::default();
+    /// let mut machine = Machine::powered(4);
     /// let id = machine.insert_cog(|| 42);
     ///
     /// // First retrieval - succeeds
@@ -211,7 +243,7 @@ impl<T: CogType> Machine<T> {
             None => Err(CogError::NotInserted(id)),
         };
         match result {
-            Ok(_) | Err(CogError::Panicked) => {
+            Ok(_) | Err(CogError::Panicked(_)) => {
                 self.cogs.remove(&id);
             }
             _ => (),
@@ -232,7 +264,7 @@ impl<T: CogType> Machine<T> {
     /// use rustycog::Machine;
     /// use rustycog::error::CogError;
     ///
-    /// let mut machine = Machine::<i32>::default();
+    /// let mut machine = Machine::powered(4);
     ///
     /// let cog1_id = machine.insert_cog(|| {0});
     /// let cog2_id = machine.insert_cog(|| {
@@ -241,7 +273,7 @@ impl<T: CogType> Machine<T> {
     /// });
     ///
     /// assert_eq!(machine.wait_for_result(cog1_id), Ok(0));
-    /// assert_eq!(machine.wait_for_result(cog2_id), Err(CogError::Panicked));
+    /// assert_eq!(machine.wait_for_result(cog2_id), Err(CogError::Panicked(cog2_id)));
     /// // Second retrieval - cog is already removed
     /// assert_eq!(machine.wait_for_result(cog2_id), Err(CogError::NotInserted(cog2_id)));
     /// ```
@@ -264,13 +296,38 @@ impl<T: CogType> Machine<T> {
 
         let result = cog.lock().unwrap().get_result();
 
-        if matches!(result, Ok(_) | Err(CogError::Panicked)) {
+        if matches!(result, Ok(_) | Err(CogError::Panicked(_))) {
             self.cogs.remove(&id);
         }
         result
     }
 
-    /// TODO: Write Documentation
+    /// Wait for the machine (task manager) to finish
+    ///
+    /// Pause execution until the machine has finished running
+    /// all of its cogs (tasks)
+    ///
+    /// # Example
+    /// ```ignore
+    /// use rustycog::{Machine, error::CogError};
+    /// let mut machine = Machine::powered(4);
+    ///
+    /// for i in 0..1000 {
+    ///     machine.insert_cog(move || i);
+    /// }
+    ///
+    /// let result = 111111;
+    ///
+    /// let last_id = machine.insert_cog(move || {
+    ///     std::thread::sleep(std::time::Duration::from_secs(1));
+    ///     result
+    /// });
+    ///
+    /// // Wait for all tasks
+    /// assert_eq!(machine.get_result(last_id), Err(CogError::NotCompleted(last_id)));
+    /// machine.wait_until_done();
+    /// assert_eq!(machine.get_result(last_id), Ok(result));
+    /// ```
     pub fn wait_until_done(&mut self) {
         loop {
             for (_, cog) in self.cogs.iter() {

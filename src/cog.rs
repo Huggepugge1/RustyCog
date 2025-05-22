@@ -58,20 +58,20 @@ where
                 // This way, in a Machine<T>, T does not have to implement Clone or Copy
                 match std::mem::replace(&mut self.state, CogState::Removed) {
                     CogState::Done(result) => Ok(result),
-                    CogState::Panicked => Err(CogError::Panicked),
+                    CogState::Panicked => Err(CogError::Panicked(self.id)),
                     _ => unreachable!(),
                 }
             }
 
-            CogState::Removed => Err(CogError::Removed),
-            CogState::Waiting | CogState::Running => Err(CogError::NotCompleted),
+            CogState::Removed => Err(CogError::Removed(self.id)),
+            CogState::Waiting | CogState::Running => Err(CogError::NotCompleted(self.id)),
         }
     }
 
     pub fn run(&mut self) -> Result<(), CogError> {
         self.state = CogState::Running;
 
-        let func = std::mem::take(&mut self.func).ok_or(CogError::AlreadyRan)?;
+        let func = std::mem::take(&mut self.func).ok_or(CogError::AlreadyRan(self.id))?;
         let result = match std::panic::catch_unwind(func) {
             Ok(result) => {
                 self.state = CogState::Done(result);
@@ -79,7 +79,7 @@ where
             }
             Err(_err) => {
                 self.state = CogState::Panicked;
-                Err(CogError::Panicked)
+                Err(CogError::Panicked(self.id))
             }
         };
 
