@@ -2,7 +2,7 @@
 name = "rustycog"
 version = "0.1.0"
 edition = "2024"
-description = "A syncrhonous task manager"
+description = "A synchronous task manager"
 repository = "https://www.github.com/Huggepugge1/RustyCog"
 license-file = "LICENSE"
 

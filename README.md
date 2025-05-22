@@ -3,9 +3,9 @@ Effortless Task Management with Dynamic Execution
 
 ## Overview
 RustyCog is a lightweight task manager for Rust. It allows
-the scheduling the cogs (Tasks), engaging (executing) the cogs and finally
-retrieve the results. The results can be retrieved at any time, either
-blocking or simply check back in a while to see if the cog has finished or not.
+you to schedule cogs (Tasks), engage (executing) them and finally
+retrieve their results. Results can be retrieved at any time, either
+blocking or simply check back in a while to see if the cog has finished.
 
 ## Installation
 ```bash
@@ -51,17 +51,17 @@ fn main() {
 ## Future Plans
 - Dynamic Engine Management: Automatically adjust the amount of background threads
   depending on the current workload.
-- Prioritization: Allowing certain cogs to be prioritized. For example a cog
-  currently being waited for will get priority for decreased response times
-- Cancel cogs before they are ran
+- Prioritization: Allowing certain cogs to be prioritized (e.g., give priority to cogs
+  currently being waited on).
+- Calcellation: Allow cogs to be cancelled before engagement.
 
 ## Why Choose RustyCog?
 RustyCog provides a unique approach to task management in Rust,
 allowing you to manage tasks like futures without actually being asynchronous.
 Synchronous + asyncrhonous in one!
 
-## Contrbuting
+## Contributing
 Contributions are welcome! Please open an issue to discuss your ideas, or fork the repo and open a pull request.
 
-## Licence
+## License
 This project is licensed under the MIT License. See [LICENSE] for details.
