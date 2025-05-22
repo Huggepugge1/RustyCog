@@ -1,30 +1,21 @@
-use std::any::Any;
-
 use rustycog::Machine;
 
 fn main() {
-    let mut machine = Machine::<Box<dyn Any + Send>>::new();
+    let mut machine = Machine::<usize>::powered(8);
 
-    let cogs = 1;
+    let cogs = 1_000_000;
 
-    for _i in 0..cogs {
-        machine.insert_cog(move || Box::new(3));
+    for i in 0..100 {
+        let mut cog_vec = Vec::new();
+        for j in 0..(cogs / 100) {
+            cog_vec.push(move || i * j)
+        }
+        machine.insert_cog_batch(cog_vec);
     }
 
-    machine.run();
-
     for i in 0..cogs {
-        println!("{:?}", machine.get_result(i));
-        println!(
-            "{:?}",
-            machine
-                .wait_for_result(i)
-                .unwrap()
-                .downcast_ref::<i32>()
-                .unwrap()
-                + 5
-        );
-        println!("{:?}", machine.wait_for_result(i));
+        let result = machine.wait_for_result(i);
+        println!("Result: {:?}", result);
     }
 
     // std::thread::sleep(std::time::Duration::from_secs(10));
