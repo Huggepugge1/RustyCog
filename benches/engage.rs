@@ -77,6 +77,22 @@ fn bench_engage_1m(c: &mut Criterion) {
     });
 }
 
+fn bench_engage_10m(c: &mut Criterion) {
+    c.bench_function("engage_10m", |b| {
+        b.iter(|| {
+            let mut machine = Machine::powered(1);
+            for _ in 0..100 {
+                let mut cogs = Vec::new();
+                for _ in 0..(10_000_000 / 100) {
+                    cogs.push(move || test_function());
+                }
+                machine.insert_cog_batch(cogs);
+            }
+            machine.wait_until_done();
+        });
+    });
+}
+
 criterion_group!(
     engage_benches,
     bench_engage_1k,
@@ -84,5 +100,6 @@ criterion_group!(
     bench_engage_100k,
     bench_engage_100k_8_engines,
     bench_engage_1m,
+    bench_engage_10m,
 );
 criterion_main!(engage_benches);
