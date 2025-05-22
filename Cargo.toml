@@ -5,7 +5,6 @@ edition = "2024"
 description = "A syncrhonous task manager"
 repository = "https://www.github.com/Huggepugge1/RustyCog"
 license-file = "LICENSE"
-keywords = ["tasks", "task management", "task manager"]
 
 [dependencies]
 thiserror = "2.0.12"
