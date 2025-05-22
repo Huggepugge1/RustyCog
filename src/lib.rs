@@ -12,7 +12,7 @@
 //! ```
 //! use rustycog::Machine;
 //!
-//! let mut machine = Machine::<i32>::default();
+//! let mut machine = Machine::powered(4);
 //! let cog_id = machine.insert_cog(|| {
 //!     println!("Hello, RustyCog!");
 //!     42
@@ -36,7 +36,7 @@
 //!     Bool(bool),
 //! }
 //!
-//! let mut machine = Machine::<MyTypes>::default();
+//! let mut machine = Machine::<MyTypes>::powered(4);
 //! machine.insert_cog(|| MyTypes::Int(42));
 //! machine.insert_cog(|| MyTypes::Bool(true));
 //! ```
@@ -48,7 +48,7 @@
 //! use rustycog::Machine;
 //! use std::any::Any;
 //!
-//! let mut any_machine = Machine::<Box<dyn Any + Send>>::default();
+//! let mut any_machine = Machine::<Box<dyn Any + Send>>::powered(4);
 //! let id = any_machine.insert_cog(|| Box::new(42));
 //!
 //! let result = any_machine.wait_for_result(id).unwrap();
@@ -61,7 +61,7 @@
 //! ```
 //!
 //! ## Error Handling
-//! RustyCog provides error handling through `CogError`.
+//! RustyCog provides error handling through MachineError and `CogError`.
 
 mod cog;
 mod engine;
