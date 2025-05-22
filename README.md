@@ -8,16 +8,15 @@ retrieve the results. The results can be retrieved at any time, either
 blocking or simply check back in a while to see if the cog has finished or not.
 
 ## Installation
-TBD
+```bash
+cargo add rustycog
+```
 
 ## Example
 ```rs
 use rustycog::Machine;
 
-// NOTE: In RustyCog 0.2.0 Machine::new() will deprecated.
-// Use Machine::powered() or Machine::cold() instead
-// But as of RustyCog 0.1.0, Machine::new() is the way to go
-let mut machine = Machine::<i32>::new();
+let mut machine = Machine::powered(8);
 let id0 = machine.insert_cog(|| 42);
 let id1 = machine.insert_cog(|| {
     println!("Running task...");
@@ -36,7 +35,7 @@ See the documentation for more information about the different errors.
 use rustycog::{Machine, error::CogError};
 
 fn main() {
-    let mut machine = Machine::<i32>::new();
+    let mut machine = Machine::<i32>::powered(8);
     let id = machine.insert_cog(|| {
         panic!("Oh no!");
     });
@@ -54,7 +53,7 @@ fn main() {
   depending on the current workload.
 - Prioritization: Allowing certain cogs to be prioritized. For example a cog
   currently being waited for will get priority for decreased response times
-- Cancel cogs at any time
+- Cancel cogs before they are ran
 
 ## Why Choose RustyCog?
 RustyCog provides a unique approach to task management in Rust,

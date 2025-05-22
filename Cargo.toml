@@ -2,6 +2,10 @@
 name = "rustycog"
 version = "0.1.0"
 edition = "2024"
+description = "A syncrhonous task manager"
+repository = "www.github.com/Huggepugge1/RustyCog"
+licence-file = "LICENCE"
+keywords = ["tasks", "task management", "task manager"]
 
 [dependencies]
 thiserror = "2.0.12"
