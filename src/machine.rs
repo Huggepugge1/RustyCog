@@ -244,8 +244,8 @@ impl<T: CogType> Machine<T> {
     pub fn get_result(&mut self, id: CogId) -> Result<T, CogError> {
         let result = match self.receivers.get(&id) {
             Some(channel) => match channel.try_recv() {
-                Ok(result) => result,
-                Err(_e) => Err(CogError::NotCompleted(id)),
+                Some(result) => result,
+                None => Err(CogError::NotCompleted(id)),
             },
             None => Err(CogError::NotInserted(id)),
         };

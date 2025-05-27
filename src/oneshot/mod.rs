@@ -24,6 +24,15 @@ impl<T> Receiver<T> {
         }
         guard.take().unwrap()
     }
+
+    pub fn try_recv(&self) -> Option<T> {
+        let (lock, _cvar) = &*self.inner;
+        let mut guard = lock.lock().unwrap();
+        match *guard {
+            Some(ref _result) => Some(guard.take().unwrap()),
+            None => None,
+        }
+    }
 }
 
 pub struct Sender<T> {
