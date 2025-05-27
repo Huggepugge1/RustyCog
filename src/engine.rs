@@ -9,8 +9,8 @@ use crate::{
     types::{CogType, EngineId},
 };
 
-type CogFn<T> = Box<dyn FnOnce() -> T + Send + std::panic::UnwindSafe + 'static>;
-type ArcMutexCog<T> = Arc<Mutex<Cog<T, CogFn<T>>>>;
+type CogFn<T> = Box<dyn FnOnce() -> T + Send + Sync + std::panic::UnwindSafe + 'static>;
+type ShortCog<T> = Cog<T, CogFn<T>>;
 
 pub struct Engine<T>
 where
@@ -18,7 +18,7 @@ where
 {
     _id: EngineId,
 
-    pub local_queue: Arc<RwLock<VecDeque<ArcMutexCog<T>>>>,
+    pub local_queue: Arc<RwLock<VecDeque<ShortCog<T>>>>,
 
     engines: Arc<RwLock<Vec<Arc<RwLock<Engine<T>>>>>>,
 
@@ -49,12 +49,12 @@ where
 
             work,
         }));
-        let handle = Some(engine.read().unwrap().run(engine.clone()));
+        let handle = Some(engine.write().unwrap().run(engine.clone()));
         engine.write().unwrap().handle = handle;
         engine
     }
 
-    fn run(&self, arc_pointer: Arc<RwLock<Self>>) -> JoinHandle<()> {
+    fn run(&mut self, arc_pointer: Arc<RwLock<Self>>) -> JoinHandle<()> {
         let local_queue = self.local_queue.clone();
         let termination_flag = self.termination_flag.clone();
         let engines = self.engines.clone();
@@ -66,8 +66,8 @@ where
                 if *termination_flag.read().unwrap() {
                     return;
                 }
-                if let Some(cog) = local_queue.write().unwrap().pop_front() {
-                    let _ = cog.lock().unwrap().run();
+                if let Some(mut cog) = local_queue.write().unwrap().pop_front() {
+                    let _ = cog.run();
                 } else if let Some(cogs) = Self::cog_steal(&engines, &arc_pointer) {
                     local_queue.write().unwrap().extend(cogs);
                 } else {
@@ -85,7 +85,7 @@ where
     fn cog_steal(
         engines: &Arc<RwLock<Vec<Arc<RwLock<Engine<T>>>>>>,
         self_pointer: &Arc<RwLock<Self>>,
-    ) -> Option<VecDeque<ArcMutexCog<T>>> {
+    ) -> Option<VecDeque<ShortCog<T>>> {
         for engine in engines.read().unwrap().iter() {
             if Arc::ptr_eq(engine, self_pointer) {
                 continue;

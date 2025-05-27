@@ -5,17 +5,18 @@ fn main() {
 
     let cogs = 1_000_000;
 
-    for i in 0..100 {
+    const BATCHES: usize = 10;
+    for i in 0..BATCHES {
         let mut cog_vec = Vec::new();
-        for j in 0..(cogs / 100) {
-            cog_vec.push(move || i * j)
+        for j in 0..(cogs / BATCHES) {
+            cog_vec.push(move || i * BATCHES + j)
         }
         machine.insert_cog_batch(cog_vec);
     }
 
     for i in 0..cogs {
-        let result = machine.wait_for_result(i);
-        println!("Result: {:?}", result);
+        let _result = machine.wait_for_result(i);
+        // println!("Result: {:?}", result);
     }
 
     // std::thread::sleep(std::time::Duration::from_secs(10));

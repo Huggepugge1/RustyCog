@@ -1,3 +1,5 @@
+use std::sync::mpsc::RecvError;
+
 use thiserror::Error;
 
 use crate::types::CogId;
@@ -73,6 +75,14 @@ pub enum CogError {
     /// Please report this if encountered.
     #[error("Cog {0} already ran")]
     AlreadyRan(CogId),
+
+    // TODO: Docs
+    #[error("Send Error")]
+    SendError,
+
+    // TODO: Docs
+    #[error("Recv Error: {0}")]
+    RecvError(#[from] RecvError),
 }
 
 /// Represents errors that can occur when interacting with a Machine (task manager).

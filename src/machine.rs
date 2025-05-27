@@ -1,16 +1,17 @@
 use std::collections::HashMap;
+use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 
 use crate::error::MachineError;
 use crate::{
-    cog::{Cog, CogState},
+    cog::Cog,
     engine::Engine,
     error::CogError,
     types::{CogId, CogType, EngineId},
 };
 
-type CogFn<T> = Box<dyn FnOnce() -> T + Send + std::panic::UnwindSafe + 'static>;
-type ArcMutexCog<T> = Arc<Mutex<Cog<T, CogFn<T>>>>;
+type CogFn<T> = Box<dyn FnOnce() -> T + Send + Sync + std::panic::UnwindSafe + 'static>;
+type ShortCog<T> = Cog<T, CogFn<T>>;
 
 /// RustyCogs task manager
 ///
@@ -22,12 +23,13 @@ where
     T: CogType,
 {
     cog_id: CogId,
-    engine_id: EngineId,
-
-    cogs: HashMap<CogId, ArcMutexCog<T>>,
+    receivers: HashMap<CogId, Receiver<Result<T, CogError>>>,
+    cog_results: HashMap<CogId, Result<T, CogError>>,
 
     max_engines: u32,
+    engine_id: EngineId,
     engines: Arc<RwLock<Vec<Arc<RwLock<Engine<T>>>>>>,
+
     work: Arc<(Mutex<bool>, Condvar)>,
 }
 
@@ -57,12 +59,13 @@ impl<T: CogType> Machine<T> {
     pub fn powered(max_engines: u32) -> Self {
         let mut machine = Self {
             cog_id: 0,
+            receivers: HashMap::new(),
+            cog_results: HashMap::new(),
+
             engine_id: 0,
-
             max_engines,
-
             engines: Arc::new(RwLock::new(Vec::new())),
-            cogs: HashMap::new(),
+
             work: Arc::new((Mutex::new(false), Condvar::new())),
         };
 
@@ -87,12 +90,13 @@ impl<T: CogType> Machine<T> {
     pub fn cold(max_engines: u32) -> Self {
         Self {
             cog_id: 0,
+            receivers: HashMap::new(),
+            cog_results: HashMap::new(),
+
             engine_id: 0,
-
-            cogs: HashMap::new(),
-
             max_engines,
             engines: Arc::new(RwLock::new(Vec::new())),
+
             work: Arc::new((Mutex::new(false), Condvar::new())),
         }
     }
@@ -152,36 +156,36 @@ impl<T: CogType> Machine<T> {
     /// ```
     pub fn insert_cog<F>(&mut self, func: F) -> CogId
     where
-        F: FnOnce() -> T + Send + std::panic::UnwindSafe + 'static,
+        F: FnOnce() -> T + Send + Sync + std::panic::UnwindSafe + 'static,
     {
         let id = self.cog_id;
-        let cog: ArcMutexCog<T> = Arc::new(Mutex::new(Cog::new(id, Box::new(func))));
-        self.cogs.insert(id, cog.clone());
+        let (sender, receiver) = channel::<Result<T, CogError>>();
+        let cog: ShortCog<T> = Cog::new(id, sender, Box::new(func));
+        self.receivers.insert(id, receiver);
         self.distribute_cog(cog);
 
         self.cog_id += 1;
         id
     }
 
-    pub fn insert_cog_batch<F>(&mut self, funcs: Vec<F>) -> CogId
+    pub fn insert_cog_batch<F>(&mut self, funcs: Vec<F>)
     where
-        F: FnOnce() -> T + Send + std::panic::UnwindSafe + 'static,
+        F: FnOnce() -> T + Send + Sync + std::panic::UnwindSafe + 'static,
     {
-        let id = self.cog_id;
         let mut cog_batch = Vec::new();
         for func in funcs {
-            let cog: ArcMutexCog<T> = Arc::new(Mutex::new(Cog::new(id, Box::new(func))));
-            self.cogs.insert(id, cog.clone());
+            let id = self.cog_id;
+            let (sender, receiver) = channel::<Result<T, CogError>>();
+            let cog: ShortCog<T> = Cog::new(id, sender, Box::new(func));
+            self.receivers.insert(id, receiver);
             cog_batch.push(cog);
+            self.cog_id += 1;
         }
         self.distribute_cog_batch(cog_batch);
-
-        self.cog_id += 1;
-        id
     }
 
-    fn distribute_cog(&self, cog: ArcMutexCog<T>) {
-        let cog_id = cog.lock().unwrap().id;
+    fn distribute_cog(&self, cog: ShortCog<T>) {
+        let cog_id = cog.id;
         if self.engines.read().unwrap().len() > 0 {
             let engine =
                 self.engines.read().unwrap()[cog_id % self.engines.read().unwrap().len()].clone();
@@ -192,8 +196,8 @@ impl<T: CogType> Machine<T> {
         }
     }
 
-    fn distribute_cog_batch(&self, cogs: Vec<ArcMutexCog<T>>) {
-        let cog_id = cogs[0].lock().unwrap().id;
+    fn distribute_cog_batch(&self, cogs: Vec<ShortCog<T>>) {
+        let cog_id = cogs[0].id;
         if self.engines.read().unwrap().len() > 0 {
             let engine =
                 self.engines.read().unwrap()[cog_id % self.engines.read().unwrap().len()].clone();
@@ -238,13 +242,16 @@ impl<T: CogType> Machine<T> {
     /// // Second retrieval - cog is already removed
     /// assert_eq!(machine.wait_for_result(id), Err(CogError::NotInserted(id)));
     pub fn get_result(&mut self, id: CogId) -> Result<T, CogError> {
-        let result = match self.cogs.get(&id) {
-            Some(cog) => cog.lock().unwrap().get_result(),
+        let result = match self.receivers.get(&id) {
+            Some(channel) => match channel.try_recv() {
+                Ok(result) => result,
+                Err(_e) => Err(CogError::NotCompleted(id)),
+            },
             None => Err(CogError::NotInserted(id)),
         };
         match result {
             Ok(_) | Err(CogError::Panicked(_)) => {
-                self.cogs.remove(&id);
+                self.receivers.remove(&id);
             }
             _ => (),
         }
@@ -278,28 +285,13 @@ impl<T: CogType> Machine<T> {
     /// assert_eq!(machine.wait_for_result(cog2_id), Err(CogError::NotInserted(cog2_id)));
     /// ```
     pub fn wait_for_result(&mut self, id: CogId) -> Result<T, CogError> {
-        let cog = self.cogs.get(&id).ok_or(CogError::NotInserted(id))?;
-
-        {
-            let locked_cog = cog.lock().unwrap();
-            if let CogState::Waiting = &locked_cog.state {
-                let (lock, cvar) = &*locked_cog.done.clone();
-                // Let the cog be run
-                drop(locked_cog);
-
-                let mut started = lock.lock().unwrap();
-                while !*started {
-                    started = cvar.wait(started).unwrap();
-                }
-            };
+        match self.receivers.remove(&id) {
+            Some(receiver) => receiver.recv()?,
+            None => self
+                .cog_results
+                .remove(&id)
+                .unwrap_or(Err(CogError::NotInserted(id))),
         }
-
-        let result = cog.lock().unwrap().get_result();
-
-        if matches!(result, Ok(_) | Err(CogError::Panicked(_))) {
-            self.cogs.remove(&id);
-        }
-        result
     }
 
     /// Wait for the machine (task manager) to finish
@@ -328,16 +320,11 @@ impl<T: CogType> Machine<T> {
     /// machine.wait_until_done();
     /// assert_eq!(machine.get_result(last_id), Ok(result));
     /// ```
-    pub fn wait_until_done(&mut self) {
-        loop {
-            for (_, cog) in self.cogs.iter() {
-                if let CogState::Done(_) = &cog.lock().unwrap().state {
-                } else {
-                    // std::thread::sleep(std::time::Duration::from_millis(1));
-                    continue;
-                }
-            }
-            return;
+    pub fn wait_until_done(&mut self) -> Result<(), CogError> {
+        for (id, receiver) in self.receivers.iter() {
+            let result = receiver.recv()?;
+            self.cog_results.insert(*id, result);
         }
+        Ok(())
     }
 }

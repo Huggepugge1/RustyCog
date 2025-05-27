@@ -51,40 +51,40 @@ fn bench_retrieve_10k_8_engines(c: &mut Criterion) {
     });
 }
 
-fn bench_retrieve_100k(c: &mut Criterion) {
-    c.bench_function("retrieve_100k", |b| {
-        b.iter(|| {
-            let mut machine = Machine::powered(1);
-            for _ in 0..100_000 {
-                machine.insert_cog(move || test_function());
-            }
-            for i in 0..100_000 {
-                let _ = machine.wait_for_result(i as CogId);
-            }
-        });
-    });
-}
+// fn bench_retrieve_100k(c: &mut Criterion) {
+//     c.bench_function("retrieve_100k", |b| {
+//         b.iter(|| {
+//             let mut machine = Machine::powered(1);
+//             for _ in 0..100_000 {
+//                 machine.insert_cog(move || test_function());
+//             }
+//             for i in 0..100_000 {
+//                 let _ = machine.wait_for_result(i as CogId);
+//             }
+//         });
+//     });
+// }
 
-fn bench_retrieve_100k_8_engines(c: &mut Criterion) {
-    c.bench_function("retrieve_100k_8_engies", |b| {
-        b.iter(|| {
-            let mut machine = Machine::powered(8);
-            for _ in 0..100_000 {
-                machine.insert_cog(move || test_function());
-            }
-            for i in 0..100_000 {
-                let _ = machine.wait_for_result(i as CogId);
-            }
-        });
-    });
-}
+// fn bench_retrieve_100k_8_engines(c: &mut Criterion) {
+//     c.bench_function("retrieve_100k_8_engies", |b| {
+//         b.iter(|| {
+//             let mut machine = Machine::powered(8);
+//             for _ in 0..100_000 {
+//                 machine.insert_cog(move || test_function());
+//             }
+//             for i in 0..100_000 {
+//                 let _ = machine.wait_for_result(i as CogId);
+//             }
+//         });
+//     });
+// }
 
 criterion_group!(
     retrieve_benches,
     bench_retrieve_1k,
     bench_retrieve_10k,
     bench_retrieve_10k_8_engines,
-    bench_retrieve_100k,
-    bench_retrieve_100k_8_engines,
+    // bench_retrieve_100k,
+    // bench_retrieve_100k_8_engines,
 );
 criterion_main!(retrieve_benches);
