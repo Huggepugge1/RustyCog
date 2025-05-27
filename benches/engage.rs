@@ -49,12 +49,8 @@ fn bench_engage_100k_8_engines(c: &mut Criterion) {
     c.bench_function("engage_100k_8_engines", |b| {
         b.iter(|| {
             let mut machine = Machine::powered(8);
-            for _ in 0..100 {
-                let mut cogs = Vec::new();
-                for _ in 0..(100_000 / 100) {
-                    cogs.push(move || test_function());
-                }
-                machine.insert_cog_batch(cogs);
+            for _ in 0..100_000 {
+                machine.insert_cog(move || test_function());
             }
             let _ = machine.wait_until_done();
         });

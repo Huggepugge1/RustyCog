@@ -64,6 +64,7 @@
 //! RustyCog provides error handling through MachineError and `CogError`.
 
 mod cog;
+mod dispatcher;
 mod engine;
 pub mod error;
 mod machine;

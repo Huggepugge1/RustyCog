@@ -47,7 +47,11 @@ where
                 sender.send(Ok(result));
                 Ok(())
             }
-            Err(_err) => Err(CogError::Panicked(self.id)),
+            Err(_err) => {
+                let err = Err(CogError::Panicked(self.id));
+                sender.send(err);
+                Err(CogError::Panicked(self.id))
+            }
         }
     }
 }

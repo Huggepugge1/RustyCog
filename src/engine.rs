@@ -1,121 +1,79 @@
 use std::{
-    collections::VecDeque,
-    sync::{Arc, Condvar, Mutex, RwLock},
+    sync::{
+        Arc, Condvar, Mutex,
+        atomic::{self, AtomicBool},
+        mpsc::Receiver,
+    },
     thread::JoinHandle,
 };
 
 use crate::{
-    cog::Cog,
+    machine::MachineMessage,
     types::{CogType, EngineId},
 };
 
-type CogFn<T> = Box<dyn FnOnce() -> T + Send + Sync + std::panic::UnwindSafe + 'static>;
-type ShortCog<T> = Cog<T, CogFn<T>>;
-
-pub struct Engine<T>
-where
-    T: CogType,
-{
+#[derive(Debug)]
+pub struct Engine {
     _id: EngineId,
 
-    pub local_queue: Arc<RwLock<VecDeque<ShortCog<T>>>>,
+    pub handle: Option<JoinHandle<()>>,
 
-    engines: Arc<RwLock<Vec<Arc<RwLock<Engine<T>>>>>>,
-
-    handle: Option<JoinHandle<()>>,
-    termination_flag: Arc<RwLock<bool>>,
-
-    work: Arc<(Mutex<bool>, Condvar)>,
+    pub ready: Arc<AtomicBool>,
+    ready_engines: Arc<(Mutex<usize>, Condvar)>,
 }
 
-impl<T> Engine<T>
-where
-    T: CogType,
-{
-    pub fn new(
+impl Engine {
+    pub fn new<T: CogType>(
         id: usize,
-        engines: Arc<RwLock<Vec<Arc<RwLock<Engine<T>>>>>>,
-        work: Arc<(Mutex<bool>, Condvar)>,
-    ) -> Arc<RwLock<Self>> {
-        let engine = Arc::new(RwLock::new(Self {
+        ready_engines: Arc<(Mutex<usize>, Condvar)>,
+        work_receiver: Receiver<MachineMessage<T>>,
+    ) -> Self {
+        let mut engine = Self {
             _id: id,
 
-            local_queue: Arc::new(RwLock::new(VecDeque::new())),
-
-            engines,
-
             handle: None,
-            termination_flag: Arc::new(RwLock::new(false)),
 
-            work,
-        }));
-        let handle = Some(engine.write().unwrap().run(engine.clone()));
-        engine.write().unwrap().handle = handle;
+            ready: Arc::new(AtomicBool::new(true)),
+            ready_engines,
+        };
+        let handle = Some(engine.run(work_receiver));
+        engine.handle = handle;
         engine
     }
 
-    fn run(&mut self, arc_pointer: Arc<RwLock<Self>>) -> JoinHandle<()> {
-        let local_queue = self.local_queue.clone();
-        let termination_flag = self.termination_flag.clone();
-        let engines = self.engines.clone();
-        // let id = self._id;
-        let work = self.work.clone();
+    fn run<T: CogType>(&mut self, work_receiver: Receiver<MachineMessage<T>>) -> JoinHandle<()> {
+        let ready_engines = self.ready_engines.clone();
+        let ready = self.ready.clone();
+        // let id = self.id;
 
         std::thread::spawn(move || {
+            {
+                let (lock, cvar) = &*ready_engines;
+                *lock.lock().unwrap() += 1;
+                cvar.notify_all();
+            }
             loop {
-                if *termination_flag.read().unwrap() {
-                    return;
-                }
-                if let Some(mut cog) = local_queue.write().unwrap().pop_front() {
-                    let _ = cog.run();
-                } else if let Some(cogs) = Self::cog_steal(&engines, &arc_pointer) {
-                    local_queue.write().unwrap().extend(cogs);
-                } else {
-                    let (lock, cvar) = &*work;
-                    let mut ready = lock.lock().unwrap();
-                    while !*ready && !*termination_flag.read().unwrap() {
-                        ready = cvar.wait(ready).unwrap();
+                match work_receiver.recv() {
+                    Ok(value) => match value {
+                        MachineMessage::Work(mut cog) => {
+                            ready.store(false, atomic::Ordering::Relaxed);
+                            let (lock, _cvar) = &*ready_engines;
+                            *lock.lock().unwrap() -= 1;
+
+                            let _ = cog.run();
+                            ready.store(true, atomic::Ordering::Relaxed);
+
+                            let (lock, cvar) = &*ready_engines;
+                            *lock.lock().unwrap() += 1;
+                            cvar.notify_all();
+                        }
+                        MachineMessage::Terminate => return,
+                    },
+                    Err(_e) => {
+                        return;
                     }
-                    *ready = false;
                 }
             }
         })
-    }
-
-    fn cog_steal(
-        engines: &Arc<RwLock<Vec<Arc<RwLock<Engine<T>>>>>>,
-        self_pointer: &Arc<RwLock<Self>>,
-    ) -> Option<VecDeque<ShortCog<T>>> {
-        for engine in engines.read().unwrap().iter() {
-            if Arc::ptr_eq(engine, self_pointer) {
-                continue;
-            }
-            let engine = engine.read().unwrap();
-            let mut queue = engine.local_queue.write().unwrap();
-            let len = queue.len();
-            if len > 0 {
-                return Some(
-                    queue
-                        .drain(0..usize::max(1, len / engines.read().unwrap().len()))
-                        .collect(),
-                );
-            }
-        }
-        None
-    }
-
-    pub fn kill(&mut self) {
-        *self.termination_flag.write().unwrap() = true;
-        if let Some(handle) = std::mem::take(&mut self.handle) {
-            self.notify_work_to_kill();
-            let _ = handle.join();
-        }
-    }
-
-    fn notify_work_to_kill(&self) {
-        let (lock, cvar) = &*self.work;
-        let mut work = lock.lock().unwrap();
-        *work = true;
-        cvar.notify_all();
     }
 }

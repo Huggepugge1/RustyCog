@@ -1,17 +1,26 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Condvar, Mutex, RwLock};
+use std::collections::{HashMap, VecDeque};
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Condvar, Mutex};
 
+use crate::dispatcher::Dispatcher;
 use crate::error::MachineError;
 use crate::{
     cog::Cog,
     engine::Engine,
     error::CogError,
-    oneshot::{Receiver, channel},
     types::{CogId, CogType, EngineId},
 };
 
-type CogFn<T> = Box<dyn FnOnce() -> T + Send + Sync + std::panic::UnwindSafe + 'static>;
+type CogFn<T> = Box<dyn FnOnce() -> T + Send + std::panic::UnwindSafe + 'static>;
 type ShortCog<T> = Cog<T, CogFn<T>>;
+
+pub enum MachineMessage<T>
+where
+    T: CogType,
+{
+    Work(ShortCog<T>),
+    Terminate,
+}
 
 /// RustyCogs task manager
 ///
@@ -23,21 +32,27 @@ where
     T: CogType,
 {
     cog_id: CogId,
-    receivers: HashMap<CogId, Receiver<Result<T, CogError>>>,
+    receivers: HashMap<CogId, crate::oneshot::Receiver<Result<T, CogError>>>,
     cog_results: HashMap<CogId, T>,
 
     max_engines: u32,
     engine_id: EngineId,
-    engines: Arc<RwLock<Vec<Arc<RwLock<Engine<T>>>>>>,
+    ready_engines: Arc<(Mutex<usize>, Condvar)>,
 
-    work: Arc<(Mutex<bool>, Condvar)>,
+    work_sender: Option<Sender<MachineMessage<T>>>,
+
+    powered: bool,
+
+    queue: Option<VecDeque<ShortCog<T>>>,
 }
 
 impl<T: CogType> Drop for Machine<T> {
     fn drop(&mut self) {
-        let engines = std::mem::take(&mut self.engines);
-        for engine in engines.read().unwrap().iter() {
-            engine.write().unwrap().kill();
+        match &self.work_sender {
+            Some(sender) => {
+                let _ = sender.send(MachineMessage::Terminate);
+            }
+            None => (),
         }
     }
 }
@@ -57,19 +72,8 @@ impl<T: CogType> Machine<T> {
     /// let i32_machine = Machine::<i32>::powered(4);
     /// ```
     pub fn powered(max_engines: u32) -> Self {
-        let mut machine = Self {
-            cog_id: 0,
-            receivers: HashMap::new(),
-            cog_results: HashMap::new(),
-
-            engine_id: 0,
-            max_engines,
-            engines: Arc::new(RwLock::new(Vec::new())),
-
-            work: Arc::new((Mutex::new(false), Condvar::new())),
-        };
-
-        machine.spawn_engines(max_engines);
+        let mut machine = Machine::cold(max_engines);
+        let _ = machine.power();
         machine
     }
 
@@ -95,9 +99,14 @@ impl<T: CogType> Machine<T> {
 
             engine_id: 0,
             max_engines,
-            engines: Arc::new(RwLock::new(Vec::new())),
 
-            work: Arc::new((Mutex::new(false), Condvar::new())),
+            ready_engines: Arc::new((Mutex::new(0), Condvar::new())),
+
+            work_sender: None,
+
+            powered: false,
+
+            queue: Some(VecDeque::new()),
         }
     }
 
@@ -121,24 +130,41 @@ impl<T: CogType> Machine<T> {
     /// assert_eq!(powered, Err(MachineError::AlreadyPowered));
     /// ```
     pub fn power(&mut self) -> Result<(), MachineError> {
-        if self.engines.read().unwrap().len() == 0 {
-            self.spawn_engines(self.max_engines);
+        if !self.powered {
+            self.spawn_dispatcher();
+            self.powered = true;
             Ok(())
         } else {
             Err(MachineError::AlreadyPowered)
         }
     }
 
-    fn spawn_engines(&mut self, amount: u32) {
+    fn spawn_engines(
+        &mut self,
+        amount: u32,
+    ) -> Vec<(Engine, std::sync::mpsc::Sender<MachineMessage<T>>)> {
+        let mut engines = Vec::new();
         for _ in 0..amount {
-            let engines = self.engines.clone();
-            self.engines.write().unwrap().push(Engine::new(
-                self.engine_id,
-                engines,
-                self.work.clone(),
+            let (sender, receiver) = std::sync::mpsc::channel();
+            engines.push((
+                Engine::new(self.engine_id, self.ready_engines.clone(), receiver),
+                sender,
             ));
             self.engine_id += 1;
         }
+        engines
+    }
+
+    fn spawn_dispatcher(&mut self) {
+        let engines = self.spawn_engines(self.max_engines);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let mut dispatcher = Dispatcher::new(engines, receiver, self.ready_engines.clone());
+        std::thread::spawn(move || dispatcher.run());
+        let queue = std::mem::take(&mut self.queue).unwrap();
+        for cog in queue {
+            let _ = sender.send(MachineMessage::Work(cog));
+        }
+        self.work_sender = Some(sender);
     }
 
     /// Insert a cog into the machine
@@ -159,60 +185,17 @@ impl<T: CogType> Machine<T> {
         F: FnOnce() -> T + Send + Sync + std::panic::UnwindSafe + 'static,
     {
         let id = self.cog_id;
-        let (sender, receiver) = channel::<Result<T, CogError>>();
+        let (sender, receiver) = crate::oneshot::channel::<Result<T, CogError>>();
         let cog: ShortCog<T> = Cog::new(id, sender, Box::new(func));
+        if let Some(sender) = &self.work_sender {
+            let _ = sender.send(MachineMessage::Work(cog));
+        } else if let Some(ref mut queue) = self.queue {
+            queue.push_back(cog);
+        }
         self.receivers.insert(id, receiver);
-        self.distribute_cog(cog);
 
         self.cog_id += 1;
         id
-    }
-
-    pub fn insert_cog_batch<F>(&mut self, funcs: Vec<F>)
-    where
-        F: FnOnce() -> T + Send + Sync + std::panic::UnwindSafe + 'static,
-    {
-        let mut cog_batch = Vec::new();
-        for func in funcs {
-            let id = self.cog_id;
-            let (sender, receiver) = channel::<Result<T, CogError>>();
-            let cog: ShortCog<T> = Cog::new(id, sender, Box::new(func));
-            self.receivers.insert(id, receiver);
-            cog_batch.push(cog);
-            self.cog_id += 1;
-        }
-        self.distribute_cog_batch(cog_batch);
-    }
-
-    fn distribute_cog(&self, cog: ShortCog<T>) {
-        let cog_id = cog.id;
-        if self.engines.read().unwrap().len() > 0 {
-            let engine =
-                self.engines.read().unwrap()[cog_id % self.engines.read().unwrap().len()].clone();
-            let engine = engine.write().unwrap();
-            engine.local_queue.write().unwrap().push_back(cog);
-
-            self.notify_work();
-        }
-    }
-
-    fn distribute_cog_batch(&self, cogs: Vec<ShortCog<T>>) {
-        let cog_id = cogs[0].id;
-        if self.engines.read().unwrap().len() > 0 {
-            let engine =
-                self.engines.read().unwrap()[cog_id % self.engines.read().unwrap().len()].clone();
-            let engine = engine.write().unwrap();
-            engine.local_queue.write().unwrap().extend(cogs);
-
-            self.notify_work();
-        }
-    }
-
-    fn notify_work(&self) {
-        let (lock, cvar) = &*self.work;
-        let mut work = lock.lock().unwrap();
-        *work = true;
-        cvar.notify_all();
     }
 
     /// Retrieves the result of a cog (task) by its ID, removing the cog once the result is
