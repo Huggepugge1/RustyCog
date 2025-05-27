@@ -1,10 +1,8 @@
-use std::{
-    fmt::{Debug, Formatter, Result as FormatResult},
-    sync::mpsc::Sender,
-};
+use std::fmt::{Debug, Formatter, Result as FormatResult};
 
 use crate::{
     error::CogError,
+    oneshot::Sender,
     types::{CogId, CogType},
 };
 
@@ -14,7 +12,7 @@ where
     F: FnOnce() -> T + std::panic::UnwindSafe,
 {
     pub id: CogId,
-    pub sender: Sender<Result<T, CogError>>,
+    pub sender: Option<Sender<Result<T, CogError>>>,
     func: Option<F>,
 }
 
@@ -36,18 +34,19 @@ where
     pub fn new(id: CogId, sender: Sender<Result<T, CogError>>, func: F) -> Self {
         Self {
             id,
-            sender,
+            sender: Some(sender),
             func: Some(func),
         }
     }
 
     pub fn run(&mut self) -> Result<(), CogError> {
         let func = std::mem::take(&mut self.func).ok_or(CogError::AlreadyRan(self.id))?;
+        let sender = std::mem::take(&mut self.sender).unwrap();
         match std::panic::catch_unwind(func) {
-            Ok(result) => match self.sender.send(Ok(result)) {
-                Ok(_) => Ok(()),
-                Err(_e) => Err(CogError::SendError),
-            },
+            Ok(result) => {
+                sender.send(Ok(result));
+                Ok(())
+            }
             Err(_err) => Err(CogError::Panicked(self.id)),
         }
     }

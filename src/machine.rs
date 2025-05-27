@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 
 use crate::error::MachineError;
@@ -7,6 +6,7 @@ use crate::{
     cog::Cog,
     engine::Engine,
     error::CogError,
+    oneshot::{Receiver, channel},
     types::{CogId, CogType, EngineId},
 };
 
@@ -24,7 +24,7 @@ where
 {
     cog_id: CogId,
     receivers: HashMap<CogId, Receiver<Result<T, CogError>>>,
-    cog_results: HashMap<CogId, Result<T, CogError>>,
+    cog_results: HashMap<CogId, T>,
 
     max_engines: u32,
     engine_id: EngineId,
@@ -286,11 +286,11 @@ impl<T: CogType> Machine<T> {
     /// ```
     pub fn wait_for_result(&mut self, id: CogId) -> Result<T, CogError> {
         match self.receivers.remove(&id) {
-            Some(receiver) => receiver.recv()?,
-            None => self
-                .cog_results
-                .remove(&id)
-                .unwrap_or(Err(CogError::NotInserted(id))),
+            Some(receiver) => receiver.recv(),
+            None => match self.cog_results.remove(&id) {
+                Some(result) => Ok(result),
+                None => Err(CogError::NotInserted(id)),
+            },
         }
     }
 
@@ -321,9 +321,10 @@ impl<T: CogType> Machine<T> {
     /// assert_eq!(machine.get_result(last_id), Ok(result));
     /// ```
     pub fn wait_until_done(&mut self) -> Result<(), CogError> {
-        for (id, receiver) in self.receivers.iter() {
+        let cog_receivers = std::mem::take(&mut self.receivers);
+        for (id, receiver) in cog_receivers {
             let result = receiver.recv()?;
-            self.cog_results.insert(*id, result);
+            self.cog_results.insert(id, result);
         }
         Ok(())
     }

@@ -67,6 +67,7 @@ mod cog;
 mod engine;
 pub mod error;
 mod machine;
+mod oneshot;
 pub mod types;
 
 #[doc(inline)]
