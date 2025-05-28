@@ -8,6 +8,7 @@ use std::{
 };
 
 use crate::{
+    cog::CogTrait,
     machine::MachineMessage,
     types::{CogType, EngineId},
 };
@@ -23,11 +24,15 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new<T: CogType>(
+    pub fn new<C, T>(
         id: usize,
         ready_engines: Arc<(Mutex<usize>, Condvar)>,
-        work_receiver: Receiver<MachineMessage<T>>,
-    ) -> Self {
+        work_receiver: Receiver<MachineMessage<C, T>>,
+    ) -> Self
+    where
+        C: CogTrait<T> + Send + 'static,
+        T: CogType,
+    {
         let mut engine = Self {
             _id: id,
 
@@ -41,7 +46,11 @@ impl Engine {
         engine
     }
 
-    fn run<T: CogType>(&mut self, work_receiver: Receiver<MachineMessage<T>>) -> JoinHandle<()> {
+    fn run<C, T>(&mut self, work_receiver: Receiver<MachineMessage<C, T>>) -> JoinHandle<()>
+    where
+        C: CogTrait<T> + Send + 'static,
+        T: CogType,
+    {
         let ready_engines = self.ready_engines.clone();
         let ready = self.ready.clone();
         // let id = self.id;
@@ -55,19 +64,20 @@ impl Engine {
             loop {
                 match work_receiver.recv() {
                     Ok(value) => match value {
-                        MachineMessage::Work(mut cog) => {
+                        MachineMessage::Work(mut cog, sender) => {
                             ready.store(false, atomic::Ordering::Relaxed);
                             let (lock, _cvar) = &*ready_engines;
                             *lock.lock().unwrap() -= 1;
 
-                            let _ = cog.run();
+                            let result = cog.run();
+                            sender.send(result);
                             ready.store(true, atomic::Ordering::Relaxed);
 
                             let (lock, cvar) = &*ready_engines;
                             *lock.lock().unwrap() += 1;
                             cvar.notify_all();
                         }
-                        MachineMessage::Terminate => return,
+                        _ => return,
                     },
                     Err(_e) => {
                         return;

@@ -10,9 +10,9 @@
 //!
 //! ## Quick Start
 //! ```
-//! use rustycog::Machine;
+//! use rustycog::{machine, error::CogError, cog::Cog};
 //!
-//! let mut machine = Machine::powered(4);
+//! let mut machine = machine!(Cog, i32, 4);
 //! let cog_id = machine.insert_cog(|| {
 //!     println!("Hello, RustyCog!");
 //!     42
@@ -29,14 +29,15 @@
 //!
 //! ### Example 1: Using Enums (Recommended)
 //! ```
-//! use rustycog::Machine;
+//! use rustycog::{machine, error::CogError, cog::Cog};
 //!
 //! enum MyTypes {
 //!     Int(i32),
 //!     Bool(bool),
 //! }
 //!
-//! let mut machine = Machine::<MyTypes>::powered(4);
+//!
+//! let mut machine = machine!(Cog, MyTypes, 4);
 //! machine.insert_cog(|| MyTypes::Int(42));
 //! machine.insert_cog(|| MyTypes::Bool(true));
 //! ```
@@ -45,11 +46,11 @@
 //! NOTE: You could replace `Box` with any other smart pointer, as long as it implements Send
 //!
 //! ```
-//! use rustycog::Machine;
+//! use rustycog::{machine, error::CogError, cog::Cog};
 //! use std::any::Any;
 //!
-//! let mut any_machine = Machine::<Box<dyn Any + Send>>::powered(4);
-//! let id = any_machine.insert_cog(|| Box::new(42));
+//! let mut any_machine = machine!(Cog, Box<dyn Any + Send>, 4);
+//! let id = any_machine.insert_cog(|| Box::new(42) as Box<dyn Any + Send>);
 //!
 //! let result = any_machine.wait_for_result(id).unwrap();
 //!
@@ -63,13 +64,27 @@
 //! ## Error Handling
 //! RustyCog provides error handling through MachineError and `CogError`.
 
-mod cog;
+pub mod cog;
 mod dispatcher;
 mod engine;
 pub mod error;
 mod machine;
 mod oneshot;
 pub mod types;
+
+#[macro_export]
+macro_rules! machine {
+    ($cog: ident, $t:ty, $threads:expr) => {
+        $crate::Machine::<$cog<$t>, $t>::powered($threads)
+    };
+}
+
+#[macro_export]
+macro_rules! cold_machine {
+    ($cog: ident, $t:ty, $threads:expr) => {
+        $crate::Machine::<$cog<$t>, $t>::cold($threads)
+    };
+}
 
 #[doc(inline)]
 pub use crate::machine::Machine;

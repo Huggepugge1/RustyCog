@@ -17,10 +17,6 @@ name = "insert"
 harness = false
 
 [[bench]]
-name = "engage"
-harness = false
-
-[[bench]]
 name = "retrieve"
 harness = false
 

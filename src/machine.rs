@@ -1,24 +1,22 @@
-use std::collections::{HashMap, VecDeque};
-use std::sync::mpsc::Sender;
-use std::sync::{Arc, Condvar, Mutex};
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::{Arc, Condvar, Mutex, mpsc::Sender},
+};
 
-use crate::dispatcher::Dispatcher;
-use crate::error::MachineError;
 use crate::{
-    cog::Cog,
+    cog::CogTrait,
+    dispatcher::Dispatcher,
     engine::Engine,
-    error::CogError,
+    error::{CogError, MachineError},
     types::{CogId, CogType, EngineId},
 };
 
-type CogFn<T> = Box<dyn FnOnce() -> T + Send + std::panic::UnwindSafe + 'static>;
-type ShortCog<T> = Cog<T, CogFn<T>>;
-
-pub enum MachineMessage<T>
+pub enum MachineMessage<C, T>
 where
+    C: CogTrait<T> + Send + 'static,
     T: CogType,
 {
-    Work(ShortCog<T>),
+    Work(C, crate::oneshot::Sender<Result<T, CogError>>),
     Terminate,
 }
 
@@ -27,8 +25,9 @@ where
 /// The Machine manages the engine (worker) and cogs (tasks)
 /// and provides some basic methods to initialize and insert cogs,
 /// as well as retrieving their results.
-pub struct Machine<T>
+pub struct Machine<C, T>
 where
+    C: CogTrait<T> + Send + 'static,
     T: CogType,
 {
     cog_id: CogId,
@@ -39,14 +38,18 @@ where
     engine_id: EngineId,
     ready_engines: Arc<(Mutex<usize>, Condvar)>,
 
-    work_sender: Option<Sender<MachineMessage<T>>>,
+    work_sender: Option<Sender<MachineMessage<C, T>>>,
 
     powered: bool,
 
-    queue: Option<VecDeque<ShortCog<T>>>,
+    queue: Option<VecDeque<(C, crate::oneshot::Sender<Result<T, CogError>>)>>,
 }
 
-impl<T: CogType> Drop for Machine<T> {
+impl<C, T> Drop for Machine<C, T>
+where
+    C: CogTrait<T> + Send,
+    T: CogType,
+{
     fn drop(&mut self) {
         match &self.work_sender {
             Some(sender) => {
@@ -57,7 +60,11 @@ impl<T: CogType> Drop for Machine<T> {
     }
 }
 
-impl<T: CogType> Machine<T> {
+impl<C, T> Machine<C, T>
+where
+    T: CogType,
+    C: CogTrait<T> + Send,
+{
     /// Creates a new, powered Machine
     ///
     /// Initialize a Machine without any cogs with the engines already running
@@ -67,9 +74,9 @@ impl<T: CogType> Machine<T> {
     ///
     /// # Example
     /// ```
-    /// use rustycog::Machine;
+    /// use rustycog::{machine, cog::Cog};
     ///
-    /// let i32_machine = Machine::<i32>::powered(4);
+    /// let i32_machine = machine!(Cog, i32, 4);
     /// ```
     pub fn powered(max_engines: u32) -> Self {
         let mut machine = Machine::cold(max_engines);
@@ -87,9 +94,9 @@ impl<T: CogType> Machine<T> {
     ///
     /// # Example
     /// ```
-    /// use rustycog::Machine;
+    /// use rustycog::{cold_machine, cog::Cog};
     ///
-    /// let i32_machine = Machine::<i32>::cold(4);
+    /// let i32_machine = cold_machine!(Cog, i32, 4);
     /// ```
     pub fn cold(max_engines: u32) -> Self {
         Self {
@@ -120,8 +127,8 @@ impl<T: CogType> Machine<T> {
     ///
     /// # Example
     /// ```
-    /// use rustycog::{Machine, error::MachineError};
-    /// let mut machine = Machine::<i32>::cold(4);
+    /// use rustycog::{cold_machine, error::{CogError, MachineError}, cog::Cog};
+    /// let mut machine = cold_machine!(Cog, i32, 4);
     ///
     /// let powered = machine.power();
     /// assert_eq!(powered, Ok(()));
@@ -142,7 +149,7 @@ impl<T: CogType> Machine<T> {
     fn spawn_engines(
         &mut self,
         amount: u32,
-    ) -> Vec<(Engine, std::sync::mpsc::Sender<MachineMessage<T>>)> {
+    ) -> Vec<(Engine, std::sync::mpsc::Sender<MachineMessage<C, T>>)> {
         let mut engines = Vec::new();
         for _ in 0..amount {
             let (sender, receiver) = std::sync::mpsc::channel();
@@ -157,14 +164,14 @@ impl<T: CogType> Machine<T> {
 
     fn spawn_dispatcher(&mut self) {
         let engines = self.spawn_engines(self.max_engines);
-        let (sender, receiver) = std::sync::mpsc::channel();
+        let (work_sender, receiver) = std::sync::mpsc::channel();
         let mut dispatcher = Dispatcher::new(engines, receiver, self.ready_engines.clone());
         std::thread::spawn(move || dispatcher.run());
         let queue = std::mem::take(&mut self.queue).unwrap();
-        for cog in queue {
-            let _ = sender.send(MachineMessage::Work(cog));
+        for (cog, sender) in queue {
+            let _ = work_sender.send(MachineMessage::Work(cog, sender));
         }
-        self.work_sender = Some(sender);
+        self.work_sender = Some(work_sender);
     }
 
     /// Insert a cog into the machine
@@ -173,24 +180,20 @@ impl<T: CogType> Machine<T> {
     ///
     /// # Example
     /// ```
-    /// use rustycog::Machine;
+    /// use rustycog::{machine, error::CogError, cog::Cog};
     ///
-    /// let mut machine = Machine::powered(4);
+    /// let mut machine = machine!(Cog, i32, 4);
     ///
     /// let cog1_id = machine.insert_cog(|| {0});
     /// let cog2_id = machine.insert_cog(|| {1});
     /// ```
-    pub fn insert_cog<F>(&mut self, func: F) -> CogId
-    where
-        F: FnOnce() -> T + Send + Sync + std::panic::UnwindSafe + 'static,
-    {
+    pub fn insert_cog<F: Into<C>>(&mut self, cog: F) -> CogId {
         let id = self.cog_id;
         let (sender, receiver) = crate::oneshot::channel::<Result<T, CogError>>();
-        let cog: ShortCog<T> = Cog::new(id, sender, Box::new(func));
-        if let Some(sender) = &self.work_sender {
-            let _ = sender.send(MachineMessage::Work(cog));
+        if let Some(work_sender) = &self.work_sender {
+            let _ = work_sender.send(MachineMessage::Work(cog.into(), sender));
         } else if let Some(ref mut queue) = self.queue {
-            queue.push_back(cog);
+            queue.push_back((cog.into(), sender));
         }
         self.receivers.insert(id, receiver);
 
@@ -206,17 +209,15 @@ impl<T: CogType> Machine<T> {
     /// - The cog has not been added to the machine (`CogError::NotFound`).
     /// - The cog has already been retrieved (`CogError::NotFound`).
     /// - The cog has not completed (`CogError::NotCompleted`).
-    /// - The cog panicked (`CogError::Panicked`).
     ///
     /// # Example
     /// NOTE: The example uses wait_for_result() to retrieve the result of the cog.
     /// This is to keep the program running synchronously
     ///
     /// ```
-    /// use rustycog::Machine;
-    /// use rustycog::error::CogError;
+    /// use rustycog::{machine, error::CogError, cog::Cog};
     ///
-    /// let mut machine = Machine::powered(4);
+    /// let mut machine = machine!(Cog, i32, 4);
     /// let id = machine.insert_cog(|| 42);
     ///
     /// // First retrieval - succeeds
@@ -232,12 +233,10 @@ impl<T: CogType> Machine<T> {
             },
             None => Err(CogError::NotInserted(id)),
         };
-        match result {
-            Ok(_) | Err(CogError::Panicked(_)) => {
-                self.receivers.remove(&id);
-            }
-            _ => (),
+        if let Ok(_) = result {
+            self.receivers.remove(&id);
         }
+
         result
     }
 
@@ -247,25 +246,18 @@ impl<T: CogType> Machine<T> {
     /// # Errors
     /// This function will return an error if:
     /// - The cog has not been added to the machine (`CogError::NotFound`).
-    /// - The cog panicked (`CogError::Panicked`).
     ///
     /// # Example
     /// ```
-    /// use rustycog::Machine;
-    /// use rustycog::error::CogError;
+    /// use rustycog::{machine, error::CogError, cog::Cog};
     ///
-    /// let mut machine = Machine::powered(4);
+    /// let mut machine = machine!(Cog, i32, 4);
     ///
-    /// let cog1_id = machine.insert_cog(|| {0});
-    /// let cog2_id = machine.insert_cog(|| {
-    ///     panic!("I paniced :(");
-    ///     0
-    /// });
+    /// let cog_id = machine.insert_cog(|| 0);
     ///
-    /// assert_eq!(machine.wait_for_result(cog1_id), Ok(0));
-    /// assert_eq!(machine.wait_for_result(cog2_id), Err(CogError::Panicked(cog2_id)));
+    /// assert_eq!(machine.wait_for_result(cog_id), Ok(0));
     /// // Second retrieval - cog is already removed
-    /// assert_eq!(machine.wait_for_result(cog2_id), Err(CogError::NotInserted(cog2_id)));
+    /// assert_eq!(machine.wait_for_result(cog_id), Err(CogError::NotInserted(cog_id)));
     /// ```
     pub fn wait_for_result(&mut self, id: CogId) -> Result<T, CogError> {
         match self.receivers.remove(&id) {
@@ -284,8 +276,8 @@ impl<T: CogType> Machine<T> {
     ///
     /// # Example
     /// ```ignore
-    /// use rustycog::{Machine, error::CogError};
-    /// let mut machine = Machine::powered(4);
+    /// use rustycog::{machine, error::CogError, cog::Cog};
+    /// let mut machine = machine!(Cog, i32, 4);
     ///
     /// for i in 0..1000 {
     ///     machine.insert_cog(move || i);

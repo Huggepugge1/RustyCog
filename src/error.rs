@@ -1,5 +1,3 @@
-use std::sync::mpsc::RecvError;
-
 use thiserror::Error;
 
 use crate::types::CogId;
@@ -14,9 +12,9 @@ pub enum CogError {
     ///
     /// # Example
     /// ```
-    /// use rustycog::{Machine, error::CogError};
+    /// use rustycog::{machine, error::CogError, cog::Cog};
     ///
-    /// let mut machine = Machine::<i32>::powered(1);
+    /// let mut machine = machine!(Cog, i32, 4);
     /// let non_existent_id = 999;
     ///
     /// assert_eq!(machine.get_result(non_existent_id), Err(CogError::NotInserted(999)));
@@ -39,9 +37,9 @@ pub enum CogError {
     ///
     /// # Example
     /// ```
-    /// use rustycog::{Machine, error::CogError};
+    /// use rustycog::{machine, error::CogError, cog::Cog};
     ///
-    /// let mut machine = Machine::powered(1);
+    /// let mut machine = machine!(Cog, i32, 4);
     /// let cog_id = machine.insert_cog(|| {
     ///     std::thread::sleep(std::time::Duration::from_secs(2));
     ///     42
@@ -52,37 +50,13 @@ pub enum CogError {
     #[error("Cog {0} has not completed yet")]
     NotCompleted(CogId),
 
-    /// The Cog (task) panicked during execution.
-    ///
-    /// This error occurs if the Cog encountered a panic while running.
-    ///
-    /// # Example
-    /// ```
-    /// use rustycog::{Machine, error::CogError};
-    ///
-    /// let mut machine = Machine::powered(1);
-    /// let cog_id = machine.insert_cog(|| panic!("Task panicked :("));
-    ///
-    /// assert_eq!(machine.wait_for_result(cog_id), Err(CogError::Panicked(cog_id)));
-    /// ```
-    #[error("Cog {0} panicked")]
-    Panicked(CogId),
-
     /// The Cog (task) has already run and cannot be run again.
     ///
     /// This error indicates that the Cog was attempted to be run multiple times,
     /// which is typically a bug in the internal logic of rustycog.
     /// Please report this if encountered.
-    #[error("Cog {0} already ran")]
-    AlreadyRan(CogId),
-
-    // TODO: Docs
-    #[error("Send Error")]
-    SendError,
-
-    // TODO: Docs
-    #[error("Recv Error: {0}")]
-    RecvError(#[from] RecvError),
+    #[error("Cog tried to run twice!")]
+    AlreadyRan,
 }
 
 /// Represents errors that can occur when interacting with a Machine (task manager).

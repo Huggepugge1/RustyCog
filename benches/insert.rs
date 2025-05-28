@@ -1,10 +1,10 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use rustycog::Machine;
+use rustycog::{cog::Cog, cold_machine};
 
 fn bench_insert_1k(c: &mut Criterion) {
     c.bench_function("insert_1k", |b| {
         b.iter(|| {
-            let mut machine = Machine::cold(1);
+            let mut machine = cold_machine!(Cog, i32, 1);
             for i in 0..1_000 {
                 machine.insert_cog(move || i);
             }
@@ -15,7 +15,7 @@ fn bench_insert_1k(c: &mut Criterion) {
 fn bench_insert_10k(c: &mut Criterion) {
     c.bench_function("insert_10k", |b| {
         b.iter(|| {
-            let mut machine = Machine::cold(1);
+            let mut machine = cold_machine!(Cog, i32, 1);
             for i in 0..10_000 {
                 machine.insert_cog(move || i);
             }
@@ -26,7 +26,7 @@ fn bench_insert_10k(c: &mut Criterion) {
 fn bench_insert_100k(c: &mut Criterion) {
     c.bench_function("insert_100k", |b| {
         b.iter(|| {
-            let mut machine = Machine::cold(1);
+            let mut machine = cold_machine!(Cog, i32, 1);
             for i in 0..100_000 {
                 machine.insert_cog(move || i);
             }
