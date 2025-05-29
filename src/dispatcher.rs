@@ -4,21 +4,21 @@ use std::{
     sync::{Arc, Condvar, Mutex},
 };
 
-use crate::{cog::CogTrait, engine::Engine, error::CogError, machine::MachineMessage};
+use crate::{cog::CogTrait, engine::Engine, machine::MachineMessage};
 
 struct CogWrapper<C>
 where
-    C: CogTrait + Send + 'static,
+    C: CogTrait + Send,
 {
     cog: C,
-    sender: crate::oneshot::Sender<Result<C::T, CogError>>,
+    sender: crate::oneshot::Sender<C::T>,
 }
 
 impl<C> CogWrapper<C>
 where
     C: CogTrait + Send + 'static,
 {
-    fn new(cog: C, sender: crate::oneshot::Sender<Result<C::T, CogError>>) -> CogWrapper<C> {
+    fn new(cog: C, sender: crate::oneshot::Sender<C::T>) -> CogWrapper<C> {
         Self { cog, sender }
     }
 }
@@ -54,7 +54,7 @@ where
 
 pub struct Dispatcher<C>
 where
-    C: CogTrait + Send + 'static,
+    C: CogTrait + Send,
 {
     engines: Vec<(Engine, std::sync::mpsc::Sender<MachineMessage<C>>)>,
     receiver: std::sync::mpsc::Receiver<MachineMessage<C>>,

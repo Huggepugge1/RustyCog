@@ -4,18 +4,17 @@ use std::{
 };
 
 use crate::{
-    cog::CogTrait,
+    cog::{CogId, CogTrait},
     dispatcher::Dispatcher,
-    engine::Engine,
+    engine::{Engine, EngineId},
     error::{CogError, MachineError},
-    types::{CogId, EngineId},
 };
 
 pub enum MachineMessage<C>
 where
-    C: CogTrait + Send + 'static,
+    C: CogTrait,
 {
-    Work(C, crate::oneshot::Sender<Result<C::T, CogError>>),
+    Work(C, crate::oneshot::Sender<C::T>),
     Terminate,
 }
 
@@ -26,10 +25,10 @@ where
 /// as well as retrieving their results.
 pub struct Machine<C>
 where
-    C: CogTrait + Send + 'static,
+    C: CogTrait,
 {
     cog_id: CogId,
-    receivers: HashMap<CogId, crate::oneshot::Receiver<Result<C::T, CogError>>>,
+    receivers: HashMap<CogId, crate::oneshot::Receiver<C::T>>,
     cog_results: HashMap<CogId, C::T>,
 
     max_engines: u32,
@@ -40,12 +39,12 @@ where
 
     powered: bool,
 
-    queue: Option<VecDeque<(C, crate::oneshot::Sender<Result<C::T, CogError>>)>>,
+    queue: Option<VecDeque<(C, crate::oneshot::Sender<C::T>)>>,
 }
 
 impl<C> Drop for Machine<C>
 where
-    C: CogTrait + Send,
+    C: CogTrait,
 {
     fn drop(&mut self) {
         match &self.work_sender {
@@ -59,14 +58,14 @@ where
 
 impl<C> Machine<C>
 where
-    C: CogTrait + Send,
+    C: CogTrait,
 {
     /// Creates a new, powered Machine
     ///
     /// Initialize a Machine without any cogs with the engines already running
     ///
     /// # Notes
-    /// - Each machine can only run cogs with the same return types.
+    /// - Each machine can only run cogs with the same return type.
     ///
     /// # Example
     /// ```
@@ -86,7 +85,7 @@ where
     /// To begin running cogs, Machine::power() must be called.
     ///
     /// # Notes
-    /// - Each machine can only run cogs with the same return types.
+    /// - Each machine can only run cogs with the same return type.
     ///
     /// # Example
     /// ```
@@ -185,7 +184,7 @@ where
     /// ```
     pub fn insert_cog(&mut self, cog: C) -> CogId {
         let id = self.cog_id;
-        let (sender, receiver) = crate::oneshot::channel::<Result<C::T, CogError>>();
+        let (sender, receiver) = crate::oneshot::channel::<C::T>();
         if let Some(work_sender) = &self.work_sender {
             let _ = work_sender.send(MachineMessage::Work(cog, sender));
         } else if let Some(ref mut queue) = self.queue {
@@ -217,14 +216,14 @@ where
     /// let id = machine.insert_cog(Cog::new(|| 42));
     ///
     /// // First retrieval - succeeds
-    /// assert_eq!(machine.wait_for_result(id), Ok(42));
+    /// assert_eq!(machine.wait_for_result(id).unwrap(), Ok(42));
     ///
     /// // Second retrieval - cog is already removed
     /// assert_eq!(machine.wait_for_result(id), Err(CogError::NotInserted(id)));
     pub fn get_result(&mut self, id: CogId) -> Result<C::T, CogError> {
         let result = match self.receivers.get(&id) {
             Some(channel) => match channel.try_recv() {
-                Some(result) => result,
+                Some(result) => Ok(result),
                 None => Err(CogError::NotCompleted(id)),
             },
             None => match self.cog_results.remove(&id) {
@@ -244,7 +243,8 @@ where
     ///
     /// # Errors
     /// This function will return an error if:
-    /// - The cog has not been added to the machine (`CogError::NotFound`).
+    /// - The cog has not been added to the machine ([`MachineError::CogError(CogError::NotFound)`]).
+    /// - The machine has not been powered ([`MachineError::NotPowered`]).
     ///
     /// # Example
     /// ```
@@ -254,16 +254,19 @@ where
     ///
     /// let cog_id = machine.insert_cog(Cog::new(|| 0));
     ///
-    /// assert_eq!(machine.wait_for_result(cog_id), Ok(0));
+    /// assert_eq!(machine.wait_for_result(cog_id).unwrap(), Ok(0));
     /// // Second retrieval - cog is already removed
     /// assert_eq!(machine.wait_for_result(cog_id), Err(CogError::NotInserted(cog_id)));
     /// ```
-    pub fn wait_for_result(&mut self, id: CogId) -> Result<C::T, CogError> {
+    pub fn wait_for_result(&mut self, id: CogId) -> Result<C::T, MachineError> {
+        if !self.powered {
+            return Err(MachineError::NotPowered);
+        }
         match self.receivers.remove(&id) {
-            Some(receiver) => receiver.recv(),
+            Some(receiver) => Ok(receiver.recv()),
             None => match self.cog_results.remove(&id) {
                 Some(result) => Ok(result),
-                None => Err(CogError::NotInserted(id)),
+                None => Err(MachineError::CogError(CogError::NotInserted(id))),
             },
         }
     }
@@ -272,6 +275,10 @@ where
     ///
     /// Pause execution until the machine has finished running
     /// all of its cogs (tasks)
+    ///
+    /// # Errors
+    /// This function will return an error if:
+    /// - The machine has not been powered ([`MachineError::NotPowered`]).
     ///
     /// # Example
     /// ```
@@ -291,12 +298,15 @@ where
     ///
     /// // Wait for all tasks
     /// machine.wait_until_done();
-    /// assert_eq!(machine.get_result(last_id), Ok(result));
+    /// assert_eq!(machine.get_result(last_id).unwrap(), Ok(result));
     /// ```
-    pub fn wait_until_done(&mut self) -> Result<(), CogError> {
+    pub fn wait_until_done(&mut self) -> Result<(), MachineError> {
+        if !self.powered {
+            return Err(MachineError::NotPowered);
+        }
         let cog_receivers = std::mem::take(&mut self.receivers);
         for (id, receiver) in cog_receivers {
-            let result = receiver.recv()?;
+            let result = receiver.recv();
             self.cog_results.insert(id, result);
         }
         Ok(())

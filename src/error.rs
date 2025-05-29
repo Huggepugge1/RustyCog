@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::types::CogId;
+use crate::cog::CogId;
 
 /// Represents errors that can occur when interacting with a Cog (task).
 #[derive(Error, Debug, PartialEq)]
@@ -49,24 +49,43 @@ pub enum CogError {
     /// ```
     #[error("Cog {0} has not completed yet")]
     NotCompleted(CogId),
-
-    /// The Cog (task) has already run and cannot be run again.
-    ///
-    /// This error indicates that the Cog was attempted to be run multiple times,
-    /// which is typically a bug in the internal logic of rustycog.
-    /// Please report this if encountered.
-    #[error("Cog tried to run twice!")]
-    AlreadyRan,
 }
 
-/// Represents errors that can occur when interacting with a Machine (task manager).
+/// Represents errors that can occur when interacting with a `Machine` (task manager).
 #[derive(Error, Debug, PartialEq)]
 pub enum MachineError {
-    /// The Machine (task manager) is already powered
+    /// The machine is already powered.
     ///
-    /// This error indicates that the machine tried to power on when it was already powered.
-    /// This usually happens when Machine::power() is called after Machine::powered() has been
+    /// This usually happens when `Machine::power()` is called after `Machine::powered()` has been
     /// called.
     #[error("Machine already powered")]
     AlreadyPowered,
+
+    /// The Machine (task manager) is not powered.
+    ///
+    /// This error indicates that someone tried to do a blocking operation
+    /// on a `Machine`, but the machine was not powered
+    /// This usually happens when `Machine::power()` has not been called after
+    /// creating a `Machine` with `Machine::cold()`.
+    #[error("Machine, Not powered")]
+    NotPowered,
+
+    /// A cog-related error occured.
+    #[error("{0}")]
+    CogError(#[from] CogError),
+}
+
+/// Errors returned by default `Cog` and `PrioCog` implementations.
+///
+/// The following errors should **never happen** in normal operation.
+/// If you see an error from here, it likely means **RustyCog is cooked** —  
+/// there’s a logic bug in task scheduling or execution.
+///
+/// # Variants
+/// - [`DefaultCogError::AlreadyRan`]: The cog was attempted to be run multiple times, indicating a serious internal error.
+#[derive(Error, Debug, PartialEq)]
+pub enum DefaultCogError {
+    /// Indicates a critical logic error: cog was executed more than once.
+    #[error("Cog already ran!")]
+    AlreadyRan,
 }

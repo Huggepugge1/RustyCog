@@ -19,7 +19,7 @@
 //! }));
 //!
 //! let result = machine.wait_for_result(cog_id).unwrap();
-//! println!("Result: {:?}", result);
+//! assert_eq!(result, Ok(42));
 //! ```
 //!
 //! ## Dynamic Typing
@@ -31,15 +31,18 @@
 //! ```
 //! use rustycog::{Machine, error::CogError, cog::Cog};
 //!
+//! #[derive(Debug, PartialEq)]
 //! enum MyTypes {
 //!     Int(i32),
 //!     Bool(bool),
 //! }
 //!
-//!
 //! let mut machine = Machine::powered(8);
-//! machine.insert_cog(Cog::new(|| MyTypes::Int(42)));
-//! machine.insert_cog(Cog::new(|| MyTypes::Bool(true)));
+//! let id1 = machine.insert_cog(Cog::new(|| MyTypes::Int(42)));
+//! let id2 = machine.insert_cog(Cog::new(|| MyTypes::Bool(true)));
+//!
+//! assert_eq!(machine.wait_for_result(id1).unwrap(), Ok(MyTypes::Int(42)));
+//! assert_eq!(machine.wait_for_result(id2).unwrap(), Ok(MyTypes::Bool(true)));
 //! ```
 //!
 //! ### Example 2: Using `Box<dyn Any>` (Advanced)
@@ -52,17 +55,17 @@
 //! let mut any_machine = Machine::powered(8);
 //! let id = any_machine.insert_cog(Cog::new(|| Box::new(42) as Box<dyn Any + Send>));
 //!
-//! let result = any_machine.wait_for_result(id).unwrap();
+//! let result = any_machine.wait_for_result(id).unwrap().unwrap();
 //!
 //! if let Some(value) = result.downcast_ref::<i32>() {
-//!     println!("Got an i32: {}", value);
+//!     assert_eq!(*value, 42);
 //! } else {
-//!     println!("Unknown type");
+//!     assert!(false, "Expected an i32, found something else!");
 //! }
 //! ```
 //!
 //! ## Error Handling
-//! RustyCog provides error handling through MachineError and `CogError`.
+//! RustyCog provides error handling through `MachineError` and `CogError`.
 
 pub mod cog;
 mod dispatcher;
@@ -70,7 +73,6 @@ mod engine;
 pub mod error;
 mod machine;
 mod oneshot;
-pub mod types;
 
 #[doc(inline)]
 pub use crate::machine::Machine;

@@ -7,11 +7,9 @@ use std::{
     thread::JoinHandle,
 };
 
-use crate::{
-    cog::CogTrait,
-    machine::MachineMessage,
-    types::{CogType, EngineId},
-};
+use crate::{cog::CogTrait, machine::MachineMessage};
+
+pub type EngineId = usize;
 
 #[derive(Debug)]
 pub struct Engine {
@@ -30,7 +28,7 @@ impl Engine {
         work_receiver: Receiver<MachineMessage<C>>,
     ) -> Self
     where
-        C: CogTrait + Send + 'static,
+        C: CogTrait,
     {
         let mut engine = Self {
             _id: id,
@@ -47,8 +45,8 @@ impl Engine {
 
     fn run<C, T>(&mut self, work_receiver: Receiver<MachineMessage<C>>) -> JoinHandle<()>
     where
-        C: CogTrait<T = T> + Send + 'static,
-        T: CogType,
+        C: CogTrait<T = T>,
+        T: Send,
     {
         let ready_engines = self.ready_engines.clone();
         let ready = self.ready.clone();

@@ -1,5 +1,5 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use rustycog::{Machine, cog::Cog, types::CogId};
+use rustycog::{Machine, cog::Cog, cog::CogId};
 
 fn test_function() -> f32 {
     let mut x: f32 = 0.0;
@@ -17,7 +17,7 @@ fn bench_retrieve_1k(c: &mut Criterion) {
                 machine.insert_cog(Cog::new(test_function));
             }
             for i in 0..1000 {
-                machine.wait_for_result(i as CogId).unwrap();
+                let _ = machine.wait_for_result(i as CogId).unwrap();
             }
         });
     });
