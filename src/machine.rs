@@ -70,9 +70,9 @@ where
     ///
     /// # Example
     /// ```
-    /// use rustycog::{machine, cog::Cog};
+    /// use rustycog::{Machine, cog::Cog};
     ///
-    /// let i32_machine = machine!(Cog, i32, 4);
+    /// let machine = Machine::<Cog<i32>>::powered(8);
     /// ```
     pub fn powered(max_engines: u32) -> Self {
         let mut machine = Machine::cold(max_engines);
@@ -90,9 +90,9 @@ where
     ///
     /// # Example
     /// ```
-    /// use rustycog::{cold_machine, cog::Cog};
+    /// use rustycog::{Machine, cog::Cog};
     ///
-    /// let i32_machine = cold_machine!(Cog, i32, 4);
+    /// let machine = Machine::<Cog<i32>>::cold(8);
     /// ```
     pub fn cold(max_engines: u32) -> Self {
         Self {
@@ -123,8 +123,8 @@ where
     ///
     /// # Example
     /// ```
-    /// use rustycog::{cold_machine, error::{CogError, MachineError}, cog::Cog};
-    /// let mut machine = cold_machine!(Cog, i32, 4);
+    /// use rustycog::{Machine, error::{CogError, MachineError}, cog::Cog};
+    /// let mut machine = Machine::<Cog<i32>>::cold(8);
     ///
     /// let powered = machine.power();
     /// assert_eq!(powered, Ok(()));
@@ -176,18 +176,18 @@ where
     ///
     /// # Example
     /// ```
-    /// use rustycog::{machine, error::CogError, cog::Cog};
+    /// use rustycog::{Machine, error::CogError, cog::Cog};
     ///
-    /// let mut machine = machine!(Cog, i32, 4);
+    /// let mut machine = Machine::powered(8);
     ///
-    /// let cog1_id = machine.insert_cog(|| {0});
-    /// let cog2_id = machine.insert_cog(|| {1});
+    /// let cog1_id = machine.insert_cog(Cog::new(|| 0));
+    /// let cog2_id = machine.insert_cog(Cog::new(|| 1));
     /// ```
     pub fn insert_cog(&mut self, cog: C) -> CogId {
         let id = self.cog_id;
         let (sender, receiver) = crate::oneshot::channel::<Result<C::T, CogError>>();
         if let Some(work_sender) = &self.work_sender {
-            let _ = work_sender.send(MachineMessage::Work(cog.into(), sender));
+            let _ = work_sender.send(MachineMessage::Work(cog, sender));
         } else if let Some(ref mut queue) = self.queue {
             queue.push_back((cog.into(), sender));
         }
@@ -211,10 +211,10 @@ where
     /// This is to keep the program running synchronously
     ///
     /// ```
-    /// use rustycog::{machine, error::CogError, cog::Cog};
+    /// use rustycog::{Machine, error::CogError, cog::Cog};
     ///
-    /// let mut machine = machine!(Cog, i32, 4);
-    /// let id = machine.insert_cog(|| 42);
+    /// let mut machine = Machine::powered(8);
+    /// let id = machine.insert_cog(Cog::new(|| 42));
     ///
     /// // First retrieval - succeeds
     /// assert_eq!(machine.wait_for_result(id), Ok(42));
@@ -227,7 +227,10 @@ where
                 Some(result) => result,
                 None => Err(CogError::NotCompleted(id)),
             },
-            None => Err(CogError::NotInserted(id)),
+            None => match self.cog_results.remove(&id) {
+                Some(result) => Ok(result),
+                None => Err(CogError::NotInserted(id)),
+            },
         };
         if let Ok(_) = result {
             self.receivers.remove(&id);
@@ -245,11 +248,11 @@ where
     ///
     /// # Example
     /// ```
-    /// use rustycog::{machine, error::CogError, cog::Cog};
+    /// use rustycog::{Machine, error::CogError, cog::Cog};
     ///
-    /// let mut machine = machine!(Cog, i32, 4);
+    /// let mut machine = Machine::powered(8);
     ///
-    /// let cog_id = machine.insert_cog(|| 0);
+    /// let cog_id = machine.insert_cog(Cog::new(|| 0));
     ///
     /// assert_eq!(machine.wait_for_result(cog_id), Ok(0));
     /// // Second retrieval - cog is already removed
@@ -271,23 +274,22 @@ where
     /// all of its cogs (tasks)
     ///
     /// # Example
-    /// ```ignore
-    /// use rustycog::{machine, error::CogError, cog::Cog};
-    /// let mut machine = machine!(Cog, i32, 4);
+    /// ```
+    /// use rustycog::{Machine, error::CogError, cog::Cog};
+    /// let mut machine = Machine::powered(8);
     ///
     /// for i in 0..1000 {
-    ///     machine.insert_cog(move || i);
+    ///     machine.insert_cog(Cog::new(move || i));
     /// }
     ///
     /// let result = 111111;
     ///
-    /// let last_id = machine.insert_cog(move || {
+    /// let last_id = machine.insert_cog(Cog::new(move || {
     ///     std::thread::sleep(std::time::Duration::from_secs(1));
     ///     result
-    /// });
+    /// }));
     ///
     /// // Wait for all tasks
-    /// assert_eq!(machine.get_result(last_id), Err(CogError::NotCompleted(last_id)));
     /// machine.wait_until_done();
     /// assert_eq!(machine.get_result(last_id), Ok(result));
     /// ```

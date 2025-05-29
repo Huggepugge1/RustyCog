@@ -12,9 +12,9 @@ pub enum CogError {
     ///
     /// # Example
     /// ```
-    /// use rustycog::{machine, error::CogError, cog::Cog};
+    /// use rustycog::{Machine, error::CogError, cog::Cog};
     ///
-    /// let mut machine = machine!(Cog, i32, 4);
+    /// let mut machine = Machine::<Cog<i32>>::powered(8);
     /// let non_existent_id = 999;
     ///
     /// assert_eq!(machine.get_result(non_existent_id), Err(CogError::NotInserted(999)));
@@ -37,13 +37,13 @@ pub enum CogError {
     ///
     /// # Example
     /// ```
-    /// use rustycog::{machine, error::CogError, cog::Cog};
+    /// use rustycog::{Machine, error::CogError, cog::Cog};
     ///
-    /// let mut machine = machine!(Cog, i32, 4);
-    /// let cog_id = machine.insert_cog(|| {
+    /// let mut machine = Machine::powered(8);
+    /// let cog_id = machine.insert_cog(Cog::new(|| {
     ///     std::thread::sleep(std::time::Duration::from_secs(2));
     ///     42
-    /// });
+    /// }));
     ///
     /// assert_eq!(machine.get_result(cog_id), Err(CogError::NotCompleted(cog_id)));
     /// ```

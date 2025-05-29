@@ -14,12 +14,12 @@ fn hash_u64(x: usize) -> usize {
 }
 
 fn main() {
-    let mut machine = rustycog::Machine::<Cog<_>>::powered(8);
+    let mut machine = rustycog::Machine::powered(8);
 
     let cogs = 1_000;
 
     for i in 0..cogs {
-        let _ = machine.insert_cog((move || hash_u64(i)).into());
+        let _ = machine.insert_cog(Cog::new(move || hash_u64(i)));
     }
 
     for i in 0..cogs {

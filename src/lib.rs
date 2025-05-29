@@ -10,13 +10,13 @@
 //!
 //! ## Quick Start
 //! ```
-//! use rustycog::{machine, error::CogError, cog::Cog};
+//! use rustycog::{Machine, error::CogError, cog::Cog};
 //!
-//! let mut machine = machine!(Cog, i32, 4);
-//! let cog_id = machine.insert_cog(|| {
+//! let mut machine = Machine::powered(8);
+//! let cog_id = machine.insert_cog(Cog::new(|| {
 //!     println!("Hello, RustyCog!");
 //!     42
-//! });
+//! }));
 //!
 //! let result = machine.wait_for_result(cog_id).unwrap();
 //! println!("Result: {:?}", result);
@@ -29,7 +29,7 @@
 //!
 //! ### Example 1: Using Enums (Recommended)
 //! ```
-//! use rustycog::{machine, error::CogError, cog::Cog};
+//! use rustycog::{Machine, error::CogError, cog::Cog};
 //!
 //! enum MyTypes {
 //!     Int(i32),
@@ -37,20 +37,20 @@
 //! }
 //!
 //!
-//! let mut machine = machine!(Cog, MyTypes, 4);
-//! machine.insert_cog(|| MyTypes::Int(42));
-//! machine.insert_cog(|| MyTypes::Bool(true));
+//! let mut machine = Machine::powered(8);
+//! machine.insert_cog(Cog::new(|| MyTypes::Int(42)));
+//! machine.insert_cog(Cog::new(|| MyTypes::Bool(true)));
 //! ```
 //!
 //! ### Example 2: Using `Box<dyn Any>` (Advanced)
 //! NOTE: You could replace `Box` with any other smart pointer, as long as it implements Send
 //!
 //! ```
-//! use rustycog::{machine, error::CogError, cog::Cog};
+//! use rustycog::{Machine, error::CogError, cog::Cog};
 //! use std::any::Any;
 //!
-//! let mut any_machine = machine!(Cog, Box<dyn Any + Send>, 4);
-//! let id = any_machine.insert_cog(|| Box::new(42) as Box<dyn Any + Send>);
+//! let mut any_machine = Machine::powered(8);
+//! let id = any_machine.insert_cog(Cog::new(|| Box::new(42) as Box<dyn Any + Send>));
 //!
 //! let result = any_machine.wait_for_result(id).unwrap();
 //!
