@@ -72,19 +72,5 @@ mod machine;
 mod oneshot;
 pub mod types;
 
-#[macro_export]
-macro_rules! machine {
-    ($cog: ident, $t:ty, $threads:expr) => {
-        $crate::Machine::<$cog<$t>, $t>::powered($threads)
-    };
-}
-
-#[macro_export]
-macro_rules! cold_machine {
-    ($cog: ident, $t:ty, $threads:expr) => {
-        $crate::Machine::<$cog<$t>, $t>::cold($threads)
-    };
-}
-
 #[doc(inline)]
 pub use crate::machine::Machine;

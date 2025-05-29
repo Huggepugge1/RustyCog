@@ -2,11 +2,10 @@ use std::cmp::Ordering;
 
 use crate::{error::CogError, types::CogType};
 
-pub trait CogTrait<T>
-where
-    T: CogType,
-{
-    fn run(&mut self) -> Result<T, CogError>;
+pub trait CogTrait {
+    type T: CogType;
+
+    fn run(&mut self) -> Result<Self::T, CogError>;
     fn priority(&self, _other: &Self) -> Ordering {
         Ordering::Equal
     }
@@ -29,11 +28,12 @@ where
     func: Option<Box<dyn FnOnce() -> T + Send + 'static>>,
 }
 
-impl<T> CogTrait<T> for Cog<T>
+impl<T> CogTrait for Cog<T>
 where
     T: CogType,
 {
-    fn run(&mut self) -> Result<T, CogError> {
+    type T = T;
+    fn run(&mut self) -> Result<Self::T, CogError> {
         let func = std::mem::take(&mut self.func).ok_or(CogError::AlreadyRan)?;
         Ok(func())
     }
@@ -61,11 +61,13 @@ where
     func: Option<Box<dyn FnOnce() -> T + Send + 'static>>,
 }
 
-impl<T> CogTrait<T> for PrioCog<T>
+impl<T> CogTrait for PrioCog<T>
 where
     T: CogType,
 {
-    fn run(&mut self) -> Result<T, CogError> {
+    type T = T;
+
+    fn run(&mut self) -> Result<Self::T, CogError> {
         let func = std::mem::take(&mut self.func).ok_or(CogError::AlreadyRan)?;
         Ok(func())
     }

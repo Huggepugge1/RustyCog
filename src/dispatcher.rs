@@ -4,85 +4,71 @@ use std::{
     sync::{Arc, Condvar, Mutex},
 };
 
-use crate::{
-    cog::CogTrait, engine::Engine, error::CogError, machine::MachineMessage, types::CogType,
-};
+use crate::{cog::CogTrait, engine::Engine, error::CogError, machine::MachineMessage};
 
-struct CogWrapper<C, T>
+struct CogWrapper<C>
 where
-    C: CogTrait<T> + Send + 'static,
-    T: CogType,
+    C: CogTrait + Send + 'static,
 {
     cog: C,
-    sender: crate::oneshot::Sender<Result<T, CogError>>,
+    sender: crate::oneshot::Sender<Result<C::T, CogError>>,
 }
 
-impl<C, T> CogWrapper<C, T>
+impl<C> CogWrapper<C>
 where
-    C: CogTrait<T> + Send + 'static,
-    T: CogType,
+    C: CogTrait + Send + 'static,
 {
-    fn new(cog: C, sender: crate::oneshot::Sender<Result<T, CogError>>) -> CogWrapper<C, T> {
+    fn new(cog: C, sender: crate::oneshot::Sender<Result<C::T, CogError>>) -> CogWrapper<C> {
         Self { cog, sender }
     }
 }
 
-impl<C, T> PartialEq for CogWrapper<C, T>
+impl<C> PartialEq for CogWrapper<C>
 where
-    C: CogTrait<T> + Send + 'static,
-    T: CogType,
+    C: CogTrait + Send + 'static,
 {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
 
-impl<C, T> Eq for CogWrapper<C, T>
-where
-    C: CogTrait<T> + Send + 'static,
-    T: CogType,
-{
-}
+impl<C> Eq for CogWrapper<C> where C: CogTrait + Send + 'static {}
 
-impl<C, T> PartialOrd for CogWrapper<C, T>
+impl<C> PartialOrd for CogWrapper<C>
 where
-    C: CogTrait<T> + Send + 'static,
-    T: CogType,
+    C: CogTrait + Send + 'static,
 {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<C, T> Ord for CogWrapper<C, T>
+impl<C> Ord for CogWrapper<C>
 where
-    C: CogTrait<T> + Send + 'static,
-    T: CogType,
+    C: CogTrait + Send + 'static,
 {
     fn cmp(&self, other: &Self) -> Ordering {
         self.cog.priority(&other.cog)
     }
 }
 
-pub struct Dispatcher<C, T>
+pub struct Dispatcher<C>
 where
-    C: CogTrait<T> + Send + 'static,
-    T: CogType,
+    C: CogTrait + Send + 'static,
 {
-    engines: Vec<(Engine, std::sync::mpsc::Sender<MachineMessage<C, T>>)>,
-    receiver: std::sync::mpsc::Receiver<MachineMessage<C, T>>,
+    engines: Vec<(Engine, std::sync::mpsc::Sender<MachineMessage<C>>)>,
+    receiver: std::sync::mpsc::Receiver<MachineMessage<C>>,
     ready_engines: Arc<(Mutex<usize>, Condvar)>,
-    queue: BinaryHeap<CogWrapper<C, T>>,
+    queue: BinaryHeap<CogWrapper<C>>,
 }
 
-impl<C, T> Dispatcher<C, T>
+impl<C> Dispatcher<C>
 where
-    C: CogTrait<T> + Send + 'static,
-    T: CogType,
+    C: CogTrait + Send + 'static,
 {
     pub fn new(
-        engines: Vec<(Engine, std::sync::mpsc::Sender<MachineMessage<C, T>>)>,
-        receiver: std::sync::mpsc::Receiver<MachineMessage<C, T>>,
+        engines: Vec<(Engine, std::sync::mpsc::Sender<MachineMessage<C>>)>,
+        receiver: std::sync::mpsc::Receiver<MachineMessage<C>>,
         ready_engines: Arc<(Mutex<usize>, Condvar)>,
     ) -> Self {
         Self {
@@ -118,7 +104,7 @@ where
         }
     }
 
-    fn dispatch(&mut self, cog: CogWrapper<C, T>) {
+    fn dispatch(&mut self, cog: CogWrapper<C>) {
         if *self.ready_engines.0.lock().unwrap() > 0 {
             for (engine, engine_sender) in self.engines.iter() {
                 if engine.ready.load(std::sync::atomic::Ordering::SeqCst) {

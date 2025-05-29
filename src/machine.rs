@@ -8,15 +8,14 @@ use crate::{
     dispatcher::Dispatcher,
     engine::Engine,
     error::{CogError, MachineError},
-    types::{CogId, CogType, EngineId},
+    types::{CogId, EngineId},
 };
 
-pub enum MachineMessage<C, T>
+pub enum MachineMessage<C>
 where
-    C: CogTrait<T> + Send + 'static,
-    T: CogType,
+    C: CogTrait + Send + 'static,
 {
-    Work(C, crate::oneshot::Sender<Result<T, CogError>>),
+    Work(C, crate::oneshot::Sender<Result<C::T, CogError>>),
     Terminate,
 }
 
@@ -25,30 +24,28 @@ where
 /// The Machine manages the engine (worker) and cogs (tasks)
 /// and provides some basic methods to initialize and insert cogs,
 /// as well as retrieving their results.
-pub struct Machine<C, T>
+pub struct Machine<C>
 where
-    C: CogTrait<T> + Send + 'static,
-    T: CogType,
+    C: CogTrait + Send + 'static,
 {
     cog_id: CogId,
-    receivers: HashMap<CogId, crate::oneshot::Receiver<Result<T, CogError>>>,
-    cog_results: HashMap<CogId, T>,
+    receivers: HashMap<CogId, crate::oneshot::Receiver<Result<C::T, CogError>>>,
+    cog_results: HashMap<CogId, C::T>,
 
     max_engines: u32,
     engine_id: EngineId,
     ready_engines: Arc<(Mutex<usize>, Condvar)>,
 
-    work_sender: Option<Sender<MachineMessage<C, T>>>,
+    work_sender: Option<Sender<MachineMessage<C>>>,
 
     powered: bool,
 
-    queue: Option<VecDeque<(C, crate::oneshot::Sender<Result<T, CogError>>)>>,
+    queue: Option<VecDeque<(C, crate::oneshot::Sender<Result<C::T, CogError>>)>>,
 }
 
-impl<C, T> Drop for Machine<C, T>
+impl<C> Drop for Machine<C>
 where
-    C: CogTrait<T> + Send,
-    T: CogType,
+    C: CogTrait + Send,
 {
     fn drop(&mut self) {
         match &self.work_sender {
@@ -60,10 +57,9 @@ where
     }
 }
 
-impl<C, T> Machine<C, T>
+impl<C> Machine<C>
 where
-    T: CogType,
-    C: CogTrait<T> + Send,
+    C: CogTrait + Send,
 {
     /// Creates a new, powered Machine
     ///
@@ -149,7 +145,7 @@ where
     fn spawn_engines(
         &mut self,
         amount: u32,
-    ) -> Vec<(Engine, std::sync::mpsc::Sender<MachineMessage<C, T>>)> {
+    ) -> Vec<(Engine, std::sync::mpsc::Sender<MachineMessage<C>>)> {
         let mut engines = Vec::new();
         for _ in 0..amount {
             let (sender, receiver) = std::sync::mpsc::channel();
@@ -187,9 +183,9 @@ where
     /// let cog1_id = machine.insert_cog(|| {0});
     /// let cog2_id = machine.insert_cog(|| {1});
     /// ```
-    pub fn insert_cog<F: Into<C>>(&mut self, cog: F) -> CogId {
+    pub fn insert_cog(&mut self, cog: C) -> CogId {
         let id = self.cog_id;
-        let (sender, receiver) = crate::oneshot::channel::<Result<T, CogError>>();
+        let (sender, receiver) = crate::oneshot::channel::<Result<C::T, CogError>>();
         if let Some(work_sender) = &self.work_sender {
             let _ = work_sender.send(MachineMessage::Work(cog.into(), sender));
         } else if let Some(ref mut queue) = self.queue {
@@ -225,7 +221,7 @@ where
     ///
     /// // Second retrieval - cog is already removed
     /// assert_eq!(machine.wait_for_result(id), Err(CogError::NotInserted(id)));
-    pub fn get_result(&mut self, id: CogId) -> Result<T, CogError> {
+    pub fn get_result(&mut self, id: CogId) -> Result<C::T, CogError> {
         let result = match self.receivers.get(&id) {
             Some(channel) => match channel.try_recv() {
                 Some(result) => result,
@@ -259,7 +255,7 @@ where
     /// // Second retrieval - cog is already removed
     /// assert_eq!(machine.wait_for_result(cog_id), Err(CogError::NotInserted(cog_id)));
     /// ```
-    pub fn wait_for_result(&mut self, id: CogId) -> Result<T, CogError> {
+    pub fn wait_for_result(&mut self, id: CogId) -> Result<C::T, CogError> {
         match self.receivers.remove(&id) {
             Some(receiver) => receiver.recv(),
             None => match self.cog_results.remove(&id) {

@@ -24,14 +24,13 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new<C, T>(
+    pub fn new<C>(
         id: usize,
         ready_engines: Arc<(Mutex<usize>, Condvar)>,
-        work_receiver: Receiver<MachineMessage<C, T>>,
+        work_receiver: Receiver<MachineMessage<C>>,
     ) -> Self
     where
-        C: CogTrait<T> + Send + 'static,
-        T: CogType,
+        C: CogTrait + Send + 'static,
     {
         let mut engine = Self {
             _id: id,
@@ -46,9 +45,9 @@ impl Engine {
         engine
     }
 
-    fn run<C, T>(&mut self, work_receiver: Receiver<MachineMessage<C, T>>) -> JoinHandle<()>
+    fn run<C, T>(&mut self, work_receiver: Receiver<MachineMessage<C>>) -> JoinHandle<()>
     where
-        C: CogTrait<T> + Send + 'static,
+        C: CogTrait<T = T> + Send + 'static,
         T: CogType,
     {
         let ready_engines = self.ready_engines.clone();
