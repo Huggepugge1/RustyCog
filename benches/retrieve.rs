@@ -3,7 +3,7 @@ use rustycog::{Machine, cog::Cog, types::CogId};
 
 fn test_function() -> f32 {
     let mut x: f32 = 0.0;
-    for _ in 0..10 {
+    for _ in 0..100 {
         x = x.sqrt().sin().cos().tan();
     }
     x
