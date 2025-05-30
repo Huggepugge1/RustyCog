@@ -4,10 +4,10 @@ use crate::error::DefaultCogError;
 
 /// A unique identifier for a submitted cog (task).
 ///
-/// Typically returned by `Machine::insert_cog`, and used to retrieve results.
+/// Typically returned by [`Machine::insert_cog`](crate::Machine::insert_cog), and used to retrieve results.
 pub type CogId = usize;
 
-/// Trait representing a task ("Cog") that can be scheduled and executed by the `Machine`.
+/// Trait representing a cog (task) that can be scheduled and executed by the [`Machine`](crate::Machine).
 ///
 /// # Associated Types
 /// - `T`: The output type produced when the cog is executed.
@@ -76,7 +76,7 @@ where
     }
 }
 
-/// A basic task ("Cog") that wraps a single `FnOnce()` closure to produce a result.
+/// A basic cog (task) that wraps a single [`trait@FnOnce`] closure to produce a result.
 ///
 /// # Type Parameters
 /// - `T`: The output type of the closure.
@@ -106,7 +106,7 @@ where
     /// Executes the task if it hasn’t already run.
     ///
     /// # Errors
-    /// Returns `DefaultCogError::AlreadyRan` if called more than once.
+    /// Returns [`DefaultCogError::AlreadyRan`] if called more than once.
     fn run(&mut self) -> Self::T {
         let func = std::mem::take(&mut self.func).ok_or(DefaultCogError::AlreadyRan)?;
         Ok(func())
@@ -123,7 +123,7 @@ where
     /// - `func`: A closure representing the work to be done.
     ///
     /// # Returns
-    /// A `Cog` instance ready for insertion into a [`Machine`](crate::Machine).
+    /// A [`Cog`] instance ready for insertion into a [`Machine`](crate::Machine).
     ///
     /// # Example
     /// ```
@@ -141,7 +141,7 @@ where
     }
 }
 
-/// A prioritized task ("Cog") that wraps a closure with an associated priority.
+/// A prioritized cog (task) that wraps a single [`trait@FnOnce`] closure with an associated priority.
 ///
 /// Higher-priority cogs are scheduled to run before lower-priority ones.
 ///
@@ -178,10 +178,10 @@ where
 {
     type T = Result<T, DefaultCogError>;
 
-    /// Executes the task if it hasn’t already run.
+    /// Executes the cog if it hasn't already run.
     ///
     /// # Errors
-    /// Returns `DefaultCogError::AlreadyRan` if called more than once.
+    /// Returns [`DefaultCogError::AlreadyRan`] if called more than once.
     fn run(&mut self) -> Self::T {
         let func = std::mem::take(&mut self.func).ok_or(DefaultCogError::AlreadyRan)?;
         Ok(func())
@@ -207,7 +207,7 @@ where
     /// - `prio`: A numeric priority; higher values indicate higher priority.
     ///
     /// # Returns
-    /// A `PrioCog` instance ready for insertion into a [`Machine`](crate::Machine).
+    /// A [`PrioCog`] instance ready for insertion into a [`Machine`](crate::Machine).
     ///
     /// # Example
     /// ```

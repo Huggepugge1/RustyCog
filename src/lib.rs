@@ -1,12 +1,12 @@
 //! # RustyCog
 //!
 //! RustyCog is a high-performance, flexible task management library for Rust.
-//! It allows you to create and manage "cogs" (tasks) in a "machine" (task pool).
+//! It allows you to create and manage cogs (tasks) in a machine (task pool).
 //!
 //! ## Features
-//! - Type safe task execution
-//! - Automatic scheduling and execution of tasks
-//! - Retrieve task results with `get_result` or `wait_for_result`
+//! - Type safe cog execution.
+//! - Automatic scheduling and execution of cogs.
+//! - Retrieve cog results with [`Machine::get_result`] or [`Machine::wait_for_result`].
 //!
 //! ## Quick Start
 //! ```
@@ -23,8 +23,8 @@
 //! ```
 //!
 //! ## Dynamic Typing
-//! RustyCog can also handle dynamically typed tasks, but you (the user) are responsible
-//! for managing type safety if using the `Any` trait.
+//! RustyCog can also handle dynamically typed cog, but you (the user) are responsible
+//! for managing type safety if using the [`trait@std::any::Any`] trait.
 //! This gives you flexibility without sacrificing performance.
 //!
 //! ### Example 1: Using Enums (Recommended)
@@ -45,8 +45,8 @@
 //! assert_eq!(machine.wait_for_result(id2).unwrap(), Ok(MyTypes::Bool(true)));
 //! ```
 //!
-//! ### Example 2: Using `Box<dyn Any>` (Advanced)
-//! NOTE: You could replace `Box` with any other smart pointer, as long as it implements Send
+//! ### Example 2: Using [`Box<dyn Any>`] (Advanced)
+//! NOTE: You could replace [`Box`] with any other smart pointer, as long as it implements [`trait@Send`]
 //!
 //! ```
 //! use rustycog::{Machine, error::CogError, cog::Cog};
@@ -65,7 +65,7 @@
 //! ```
 //!
 //! ## Error Handling
-//! RustyCog provides error handling through `MachineError` and `CogError`.
+//! RustyCog provides error handling through [`MachineError`](crate::error::MachineError) and [`CogError`](crate::error::CogError).
 
 pub mod cog;
 mod dispatcher;

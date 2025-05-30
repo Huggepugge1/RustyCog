@@ -1,14 +1,11 @@
-use rustycog::{
-    Machine,
-    cog::{Cog, PrioCog},
-};
+use rustycog::Machine;
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 fn hash_u64(x: usize) -> usize {
     let mut result: usize = 0;
-    for _ in 0..1_000_000 {
+    for _ in 0..1000 {
         let mut hasher = DefaultHasher::new();
         x.hash(&mut hasher);
         result = result.checked_add(hasher.finish() as usize).unwrap_or(0);
@@ -57,25 +54,26 @@ fn main() {
         }
     }
 
-    let mut machine = Machine::cold(1);
+    let mut machine = Machine::cold(8);
 
-    let cogs = 1_000;
+    let cogs = 1_000_000;
 
     for i in 0..cogs {
         let _ = machine.insert_cog(MyCog {
             func: Some(Box::new(move || {
-                println!("{i:#03}: {:?}", Importance::from(i));
-                i
+                // println!("{i:#03}: {:?}", Importance::from(i));
+                hash_u64(i)
             })),
             importance: Importance::from(i),
         });
     }
 
     let _ = machine.power();
+    println!("power");
 
     for i in 0..cogs {
-        let result = machine.wait_for_result(i).unwrap();
-        assert_eq!(result, i);
+        let _result = machine.wait_for_result(i).unwrap();
+        // assert_eq!(result, hash_u64(i));
     }
 
     // std::thread::sleep(std::time::Duration::from_secs(10));

@@ -122,3 +122,75 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use crate::{
+        Machine,
+        cog::{CogId, PrioCog},
+    };
+
+    #[test]
+    fn test_priorities() {
+        let mut machine = Machine::cold(1);
+        const COGS: CogId = 1000;
+
+        let counter = Arc::new(Mutex::new(0));
+
+        let mut cog_ids = Vec::new();
+
+        for i in 0..COGS {
+            let counter = counter.clone();
+            cog_ids.push(machine.insert_cog(PrioCog::new(
+                move || {
+                    if *counter.lock().unwrap() == i {
+                        *counter.lock().unwrap() += 1;
+                        true
+                    } else {
+                        *counter.lock().unwrap() += 1;
+                        false
+                    }
+                },
+                COGS - i,
+            )));
+        }
+        let _ = machine.power();
+
+        for id in cog_ids {
+            assert!(machine.wait_for_result(id).unwrap().unwrap());
+        }
+    }
+
+    #[test]
+    fn test_reverse_priorities() {
+        let mut machine = Machine::cold(1);
+        const COGS: CogId = 1000;
+
+        let counter = Arc::new(Mutex::new(0));
+
+        let mut cog_ids = Vec::new();
+
+        for i in 0..COGS {
+            let counter = counter.clone();
+            cog_ids.push(machine.insert_cog(PrioCog::new(
+                move || {
+                    if *counter.lock().unwrap() == COGS - i - 1 {
+                        *counter.lock().unwrap() += 1;
+                        true
+                    } else {
+                        *counter.lock().unwrap() += 1;
+                        false
+                    }
+                },
+                i,
+            )));
+        }
+        let _ = machine.power();
+
+        for id in cog_ids {
+            assert!(machine.wait_for_result(id).unwrap().unwrap());
+        }
+    }
+}

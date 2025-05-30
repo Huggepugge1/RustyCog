@@ -20,7 +20,7 @@ where
 
 /// RustyCogs task manager
 ///
-/// The Machine manages the engine (worker) and cogs (tasks)
+/// The [`Machine`] manages the engine (worker) and cogs (tasks)
 /// and provides some basic methods to initialize and insert cogs,
 /// as well as retrieving their results.
 pub struct Machine<C>
@@ -60,7 +60,7 @@ impl<C> Machine<C>
 where
     C: CogTrait,
 {
-    /// Creates a new, powered Machine
+    /// Creates a new, powered [`Machine`]
     ///
     /// Initialize a Machine without any cogs with the engines already running
     ///
@@ -79,10 +79,10 @@ where
         machine
     }
 
-    /// Creates a new, cold Machine
+    /// Creates a new, cold [`Machine`]
     ///
     /// Initialize a Machine without any cogs and no engines running.
-    /// To begin running cogs, Machine::power() must be called.
+    /// To begin running cogs, [`Machine::power()`] must be called.
     ///
     /// # Notes
     /// - Each machine can only run cogs with the same return type.
@@ -112,13 +112,13 @@ where
         }
     }
 
-    /// Power on a cold Machine
+    /// Power on a cold [`Machine`]
     ///
     /// A machine being powered means the machine can run cogs.
     ///
     /// # Errors
     /// This function will return an error if:
-    /// - The machine is already powered (`MachineError::AlreadyPowered`)
+    /// - The machine is already powered [`MachineError::AlreadyPowered`]
     ///
     /// # Example
     /// ```
@@ -141,12 +141,9 @@ where
         }
     }
 
-    fn spawn_engines(
-        &mut self,
-        amount: u32,
-    ) -> Vec<(Engine, std::sync::mpsc::Sender<MachineMessage<C>>)> {
+    fn spawn_engines(&mut self) -> Vec<(Engine, std::sync::mpsc::Sender<MachineMessage<C>>)> {
         let mut engines = Vec::new();
-        for _ in 0..amount {
+        for _ in 0..self.max_engines {
             let (sender, receiver) = std::sync::mpsc::channel();
             engines.push((
                 Engine::new(self.engine_id, self.ready_engines.clone(), receiver),
@@ -158,7 +155,7 @@ where
     }
 
     fn spawn_dispatcher(&mut self) {
-        let engines = self.spawn_engines(self.max_engines);
+        let engines = self.spawn_engines();
         let (work_sender, receiver) = std::sync::mpsc::channel();
         let mut dispatcher = Dispatcher::new(engines, receiver, self.ready_engines.clone());
         std::thread::spawn(move || dispatcher.run());
@@ -169,9 +166,7 @@ where
         self.work_sender = Some(work_sender);
     }
 
-    /// Insert a cog into the machine
-    ///
-    /// Inserts a cog (task) into the machine.
+    /// Insert a cog into the machine.
     ///
     /// # Example
     /// ```
@@ -196,21 +191,21 @@ where
         id
     }
 
-    /// Retrieves the result of a cog (task) by its ID, removing the cog once the result is
+    /// Retrieves the result of a cog by its ID, removing the cog once the result is
     /// retrieved.
     ///
     /// # Errors
     /// This function will return an error if:
-    /// - The cog has not been added to the machine (`CogError::NotFound`).
-    /// - The cog has already been retrieved (`CogError::NotFound`).
-    /// - The cog has not completed (`CogError::NotCompleted`).
+    /// - The cog has not been added to the machine [`MachineError::CogError(CogError::NotInserted)`](MachineError::CogError).
+    /// - The cog has already been retrieved [`MachineError::CogError(CogError::NotInserted)`](MachineError::CogError).
+    /// - The cog has not completed [`MachineError::CogError(CogError::NotCompleted)`](MachineError::CogError).
     ///
     /// # Example
     /// NOTE: The example uses wait_for_result() to retrieve the result of the cog.
     /// This is to keep the program running synchronously
     ///
     /// ```
-    /// use rustycog::{Machine, error::CogError, cog::Cog};
+    /// use rustycog::{Machine, error::{CogError, MachineError}, cog::Cog};
     ///
     /// let mut machine = Machine::powered(8);
     /// let id = machine.insert_cog(Cog::new(|| 42));
@@ -218,17 +213,19 @@ where
     /// // First retrieval - succeeds
     /// assert_eq!(machine.wait_for_result(id).unwrap(), Ok(42));
     ///
-    /// // Second retrieval - cog is already removed
-    /// assert_eq!(machine.wait_for_result(id), Err(CogError::NotInserted(id)));
-    pub fn get_result(&mut self, id: CogId) -> Result<C::T, CogError> {
-        let result = match self.receivers.get(&id) {
+    /// assert_eq!(
+    ///     machine.wait_for_result(id),
+    ///     Err(MachineError::CogError(CogError::NotInserted(id)))
+    /// );
+    pub fn get_result(&mut self, id: CogId) -> Result<C::T, MachineError> {
+        let result = match self.receivers.get_mut(&id) {
             Some(channel) => match channel.try_recv() {
                 Some(result) => Ok(result),
-                None => Err(CogError::NotCompleted(id)),
+                None => Err(MachineError::CogError(CogError::NotCompleted(id))),
             },
             None => match self.cog_results.remove(&id) {
                 Some(result) => Ok(result),
-                None => Err(CogError::NotInserted(id)),
+                None => Err(MachineError::CogError(CogError::NotInserted(id))),
             },
         };
         if let Ok(_) = result {
@@ -238,32 +235,36 @@ where
         result
     }
 
-    /// Waits for the result of a cog (task) by its ID, removing the cog once the result is
+    /// Waits for the result of a cog  by its ID, removing the cog once the result is
     /// retrieved.
     ///
     /// # Errors
     /// This function will return an error if:
-    /// - The cog has not been added to the machine ([`MachineError::CogError(CogError::NotFound)`]).
-    /// - The machine has not been powered ([`MachineError::NotPowered`]).
+    /// - The cog has not been added to the machine [`MachineError::CogError(CogError::NotInserted(id))`](MachineError::CogError).
+    /// - The machine has not been powered [`MachineError::NotPowered`].
     ///
     /// # Example
     /// ```
-    /// use rustycog::{Machine, error::CogError, cog::Cog};
+    /// use rustycog::{Machine, error::{CogError, MachineError}, cog::Cog};
     ///
     /// let mut machine = Machine::powered(8);
     ///
     /// let cog_id = machine.insert_cog(Cog::new(|| 0));
     ///
     /// assert_eq!(machine.wait_for_result(cog_id).unwrap(), Ok(0));
+    ///
     /// // Second retrieval - cog is already removed
-    /// assert_eq!(machine.wait_for_result(cog_id), Err(CogError::NotInserted(cog_id)));
+    /// assert_eq!(
+    ///     machine.wait_for_result(cog_id),
+    ///     Err(MachineError::CogError(CogError::NotInserted(cog_id)))
+    /// );
     /// ```
     pub fn wait_for_result(&mut self, id: CogId) -> Result<C::T, MachineError> {
         if !self.powered {
             return Err(MachineError::NotPowered);
         }
         match self.receivers.remove(&id) {
-            Some(receiver) => Ok(receiver.recv()),
+            Some(receiver) => Ok(receiver.recv()?),
             None => match self.cog_results.remove(&id) {
                 Some(result) => Ok(result),
                 None => Err(MachineError::CogError(CogError::NotInserted(id))),
@@ -271,14 +272,14 @@ where
         }
     }
 
-    /// Wait for the machine (task manager) to finish
+    /// Wait for the machine to finish.
     ///
-    /// Pause execution until the machine has finished running
-    /// all of its cogs (tasks)
+    /// Pause execution until the machine has finished engaging (executing)
+    /// all of its cogs.
     ///
     /// # Errors
     /// This function will return an error if:
-    /// - The machine has not been powered ([`MachineError::NotPowered`]).
+    /// - The machine has not been powered [`MachineError::NotPowered`].
     ///
     /// # Example
     /// ```
@@ -296,7 +297,7 @@ where
     ///     result
     /// }));
     ///
-    /// // Wait for all tasks
+    /// // Wait for all cogs
     /// machine.wait_until_done();
     /// assert_eq!(machine.get_result(last_id).unwrap(), Ok(result));
     /// ```
@@ -306,9 +307,82 @@ where
         }
         let cog_receivers = std::mem::take(&mut self.receivers);
         for (id, receiver) in cog_receivers {
-            let result = receiver.recv();
+            let result = receiver.recv()?;
             self.cog_results.insert(id, result);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Machine;
+    use crate::{
+        cog::Cog,
+        error::{CogError, MachineError},
+    };
+
+    #[test]
+    fn test_insert_cog() {
+        let mut machine = Machine::cold(1);
+
+        let cog = Cog::new(|| 32i32);
+        let id = machine.insert_cog(cog);
+
+        assert_eq!(
+            machine.get_result(id),
+            Err(MachineError::CogError(CogError::NotCompleted(id)))
+        );
+    }
+
+    #[test]
+    fn test_power() {
+        let mut machine = Machine::<Cog<i32>>::cold(1);
+        assert_eq!(machine.power(), Ok(()));
+        assert_eq!(machine.power(), Err(MachineError::AlreadyPowered));
+
+        let mut machine = Machine::<Cog<i32>>::powered(1);
+        assert_eq!(machine.power(), Err(MachineError::AlreadyPowered));
+    }
+
+    #[test]
+    fn test_wait_until_done() {
+        let mut machine = Machine::<Cog<i32>>::powered(1);
+
+        assert_eq!(machine.wait_until_done(), Ok(()));
+    }
+
+    #[test]
+    fn test_get_result() {
+        let mut machine = Machine::cold(1);
+
+        let cog = Cog::new(|| {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            32i32
+        });
+        let id = machine.insert_cog(cog);
+
+        assert_eq!(
+            machine.get_result(id),
+            Err(MachineError::CogError(CogError::NotCompleted(id)))
+        );
+
+        let _ = machine.power();
+
+        let _ = machine.wait_until_done();
+
+        assert_eq!(machine.get_result(id), Ok(Ok(32)));
+    }
+
+    #[test]
+    fn test_wait_for_results() {
+        let mut machine = Machine::powered(1);
+
+        let cog = Cog::new(|| 32i32);
+        let id = machine.insert_cog(cog);
+
+        let _ = machine.wait_until_done();
+
+        assert_eq!(machine.get_result(id), Ok(Ok(32)));
     }
 }
