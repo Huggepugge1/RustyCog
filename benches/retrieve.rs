@@ -1,9 +1,9 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use rustycog::{Machine, types::CogId};
+use rustycog::{Machine, cog::Cog, cog::CogId};
 
 fn test_function() -> f32 {
     let mut x: f32 = 0.0;
-    for _ in 0..10 {
+    for _ in 0..100 {
         x = x.sqrt().sin().cos().tan();
     }
     x
@@ -14,10 +14,10 @@ fn bench_retrieve_1k(c: &mut Criterion) {
         b.iter(|| {
             let mut machine = Machine::powered(1);
             for _ in 0..1000 {
-                machine.insert_cog(move || test_function());
+                machine.insert_cog(Cog::new(test_function));
             }
             for i in 0..1000 {
-                machine.wait_for_result(i as CogId).unwrap();
+                let _ = machine.wait_for_result(i as CogId).unwrap();
             }
         });
     });
@@ -28,7 +28,7 @@ fn bench_retrieve_10k(c: &mut Criterion) {
         b.iter(|| {
             let mut machine = Machine::powered(1);
             for _ in 0..10_000 {
-                machine.insert_cog(move || test_function());
+                machine.insert_cog(Cog::new(test_function));
             }
             for i in 0..10_000 {
                 let _ = machine.wait_for_result(i as CogId);
@@ -42,7 +42,7 @@ fn bench_retrieve_10k_8_engines(c: &mut Criterion) {
         b.iter(|| {
             let mut machine = Machine::powered(8);
             for _ in 0..10_000 {
-                machine.insert_cog(move || test_function());
+                machine.insert_cog(Cog::new(test_function));
             }
             for i in 0..10_000 {
                 let _ = machine.wait_for_result(i as CogId);
@@ -56,7 +56,7 @@ fn bench_retrieve_100k(c: &mut Criterion) {
         b.iter(|| {
             let mut machine = Machine::powered(1);
             for _ in 0..100_000 {
-                machine.insert_cog(move || test_function());
+                machine.insert_cog(Cog::new(test_function));
             }
             for i in 0..100_000 {
                 let _ = machine.wait_for_result(i as CogId);
@@ -70,7 +70,7 @@ fn bench_retrieve_100k_8_engines(c: &mut Criterion) {
         b.iter(|| {
             let mut machine = Machine::powered(8);
             for _ in 0..100_000 {
-                machine.insert_cog(move || test_function());
+                machine.insert_cog(Cog::new(test_function));
             }
             for i in 0..100_000 {
                 let _ = machine.wait_for_result(i as CogId);

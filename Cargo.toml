@@ -1,6 +1,6 @@
 [package]
 name = "rustycog"
-version = "0.1.0"
+version = "0.2.1"
 edition = "2024"
 description = "A synchronous task manager"
 repository = "https://www.github.com/Huggepugge1/RustyCog"
@@ -17,12 +17,11 @@ name = "insert"
 harness = false
 
 [[bench]]
-name = "engage"
-harness = false
-
-[[bench]]
 name = "retrieve"
 harness = false
 
 [profile.bench]
+debug = true
+
+[profile.release]
 debug = true

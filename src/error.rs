@@ -1,88 +1,110 @@
 use thiserror::Error;
 
-use crate::types::CogId;
+use crate::cog::CogId;
 
 /// Represents errors that can occur when interacting with a Cog (task).
 #[derive(Error, Debug, PartialEq)]
 pub enum CogError {
-    /// The specified Cog (task) ID was not found in the Machine.
+    /// A cog with the ID was not found in the [`Machine`](crate::Machine).
     ///
     /// This error typically occurs when trying to get the result of a Cog
-    /// that was never inserted or has already been removed.
+    /// that was never inserted or has already been retrieved.
     ///
     /// # Example
     /// ```
-    /// use rustycog::{Machine, error::CogError};
+    /// use rustycog::{Machine, error::{CogError, MachineError}, cog::Cog};
     ///
-    /// let mut machine = Machine::<i32>::powered(1);
+    /// let mut machine = Machine::<Cog<i32>>::powered(8);
     /// let non_existent_id = 999;
     ///
-    /// assert_eq!(machine.get_result(non_existent_id), Err(CogError::NotInserted(999)));
+    /// assert_eq!(
+    ///     machine.get_result(non_existent_id),
+    ///     Err(MachineError::CogError(CogError::NotInserted(999)))
+    /// );
     /// ```
     #[error("Cog {0} not found")]
     NotInserted(CogId),
 
-    /// The Cog (task) has been marked as removed from it's Machine but the Cog
-    /// was still in the Machine and the Machine tried to access it.
+    /// The cog has been marked as removed from it's [`Machine`](crate::Machine) but the cog
+    /// was still in the machine, but the machine tried to access it.
     ///
-    /// This error indicates that the Cog was accessed after the Cog was removed
+    /// This error indicates that the cog was accessed after the cog was removed
     /// from the machine which is typically a bug in the internal logic of RustyCog.
     /// Please report this if encountered.
     #[error("Cog {0} has been removed")]
     Removed(CogId),
 
-    /// The Cog (task) has not yet completed its execution.
+    /// The cog has not yet completed its execution.
     ///
     /// This error may occur when trying to get the result of a waiting or running task.
     ///
     /// # Example
     /// ```
-    /// use rustycog::{Machine, error::CogError};
+    /// use rustycog::{Machine, error::{CogError, MachineError}, cog::Cog};
     ///
-    /// let mut machine = Machine::powered(1);
-    /// let cog_id = machine.insert_cog(|| {
+    /// let mut machine = Machine::powered(8);
+    /// let cog_id = machine.insert_cog(Cog::new(|| {
     ///     std::thread::sleep(std::time::Duration::from_secs(2));
     ///     42
-    /// });
+    /// }));
     ///
-    /// assert_eq!(machine.get_result(cog_id), Err(CogError::NotCompleted(cog_id)));
+    /// assert_eq!(
+    ///     machine.get_result(cog_id),
+    ///     Err(MachineError::CogError(CogError::NotCompleted(cog_id)))
+    /// );
     /// ```
     #[error("Cog {0} has not completed yet")]
     NotCompleted(CogId),
-
-    /// The Cog (task) panicked during execution.
-    ///
-    /// This error occurs if the Cog encountered a panic while running.
-    ///
-    /// # Example
-    /// ```
-    /// use rustycog::{Machine, error::CogError};
-    ///
-    /// let mut machine = Machine::powered(1);
-    /// let cog_id = machine.insert_cog(|| panic!("Task panicked :("));
-    ///
-    /// assert_eq!(machine.wait_for_result(cog_id), Err(CogError::Panicked(cog_id)));
-    /// ```
-    #[error("Cog {0} panicked")]
-    Panicked(CogId),
-
-    /// The Cog (task) has already run and cannot be run again.
-    ///
-    /// This error indicates that the Cog was attempted to be run multiple times,
-    /// which is typically a bug in the internal logic of rustycog.
-    /// Please report this if encountered.
-    #[error("Cog {0} already ran")]
-    AlreadyRan(CogId),
 }
 
-/// Represents errors that can occur when interacting with a Machine (task manager).
+/// Represents errors that can occur when interacting with a [`Machine`](crate::Machine) (task manager).
 #[derive(Error, Debug, PartialEq)]
 pub enum MachineError {
-    /// The Machine (task manager) is already powered
+    /// The machine is already powered.
     ///
-    /// This error indicates that the machine tried to power on when it was already powered.
-    /// This usually happens when Machine::power() is called after Machine::powered() has been
+    /// This usually happens when [`Machine::powered`](crate::Machine::powered)
+    /// is called after [`Machine::powered`](crate::Machine::powered) has already been
     /// called.
     #[error("Machine already powered")]
     AlreadyPowered,
+
+    /// The [`Machine`](crate::Machine) is not powered.
+    ///
+    /// This error indicates that someone tried to do a blocking operation
+    /// on a `Machine`, but the machine was not powered
+    /// This usually happens when [`Machine::powered`](crate::Machine::powered) has not been called after
+    /// creating a `Machine` with [`Machine::cold`](crate::Machine::cold).
+    #[error("Machine, Not powered")]
+    NotPowered,
+
+    /// A cog-related error occured.
+    #[error("{0}")]
+    CogError(#[from] CogError),
+
+    /// An reciever error
+    #[error("{0}")]
+    RecvError(#[from] RecvError),
+}
+
+/// Errors returned by default [`Cog`](crate::cog::Cog) and [`PrioCog`](crate::cog::Cog) implementations.    
+///
+/// The following errors should **never happen** in normal operation.
+/// If you see an error from here, it likely means **RustyCog is cooked** —  
+/// there’s a logic bug in task scheduling or execution.
+///
+/// # Variants
+/// - [`DefaultCogError::AlreadyRan`]: The cog was attempted to be run multiple times, indicating a serious internal error.
+#[derive(Error, Debug, PartialEq)]
+pub enum DefaultCogError {
+    /// Indicates a critical logic error: cog was executed more than once.
+    #[error("Cog already ran!")]
+    AlreadyRan,
+}
+
+/// Represents errors that can occur when dealing with oneshot channels
+#[derive(Error, Debug, PartialEq)]
+pub enum RecvError {
+    /// The oneshot value was consumed twice
+    #[error("Value consumed")]
+    ValueConsumed,
 }
